@@ -1,10 +1,14 @@
-
+import sqlite3
 
 
 
 if __name__ == "__main__":
     # Initialize a database file
+    con = sqlite3.connect('transactions.db')
+    cur = con.cursor()
+
     # Initialize a table for raw transactions
+    cur.execute("CREATE TABLE IF NOT EXISTS raw_transactions()")
     '''
     Initialize a table for processed transactions
         Coloumns shall consist of:
