@@ -21,6 +21,7 @@ if __name__ == "__main__":
         Cost basis Sell (cost of the transaction)
 
     '''     
+    
 
 
     # Import data from CSVs, for now, just from chase or fidelity
