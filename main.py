@@ -20,7 +20,8 @@ def create_db():
     # FOR TESTING PURPOSES REMOVE ALL TABLES#
     drop_sql = ["DROP TABLE IF EXISTS raw_transactions",
                 "DROP TABLE IF EXISTS gains",
-                "DROP TABLE IF EXISTS cusip_ticker"]
+                "DROP TABLE IF EXISTS cusip_ticker",
+                "DROP TABLE IF EXISTS holdings"]
     try:
         for statement in drop_sql:
             cur.execute(statement)
@@ -61,7 +62,12 @@ def create_db():
             ticker TEXT NOT NULL,
             date_inserted TEXT NOT NULL, 
             date_modified TEXT NOT NULL,
-            UNIQUE(cusip))"""
+            UNIQUE(cusip))""",
+        """CREATE TABLE IF NOT EXISTS holdings(
+            [reference to buy transaction],
+            cost_per_share REAL,
+            split TEXT,
+            [reference to sell transaction])"""
         ]
     try:
         for statement in sql_statement:
@@ -75,14 +81,24 @@ def create_db():
 
 def chase_process_transactions(file_name: str, con: sqlite3.Connection, cur: sqlite3.Cursor):
 
+    # Read in raw transaction data from csv file
+    insert_raw_transactions(file_name, con, cur)
+
+    # Start calculating capital gains
+
+    
+
+def insert_raw_transactions(file_name: str, con: sqlite3.Connection, cur: sqlite3.Cursor):
+
     '''
     IDEA FOR EXPANDING: Maybe I can pass in a dict that contains the unique field 
     names for each brokerage and reuse all this code.
 
     The dict would contain standardized entries and their value would be the broker 
     specific values
-    '''
 
+    If I do this, then I also need to pass in the brokerage name into this function
+    '''
     # Specifying the encoding removes the extra encoding flag inserted into first read later on
     csvfile = open(file_name, newline='', encoding='utf-8-sig')
 
@@ -116,7 +132,9 @@ def chase_process_transactions(file_name: str, con: sqlite3.Connection, cur: sql
 
     except sqlite3.Error as e:
         print(e)
-    pass
+    
+    # Close the file
+    csvfile.close()
 
 if __name__ == "__main__":
     
@@ -136,13 +154,27 @@ if __name__ == "__main__":
         Quantity Sell
         Cost basis Sell (cost of the transaction)
 
-    '''     
+    '''
     # Import data from CSVs, for now, just from chase or fidelity
 
     # FOR CHASE #
-    chase_process_transactions('transactions.csv', con, cur)
+    # chase_process_transactions('transactions.csv', con, cur)
     
-
+    # Calculating captial gains
+    '''
+    Intermediate table that has buy and sell transactions
+    If I sell, check for oldest buy that isnt closed out
+        If it is closed out, find next oldest and use that
+        If I sell all shares from that buy, close out the buy and move on to next oldest for remaining shares
+    If rsa transaction, delete shares and add back later (there should be 2 per reverse or CIL)
+        1. Find oldest buy
+        2. subtract the shares depicted in the rsa transaction
+        3. On the next rsa transaction, add shares depicted
+            In the end, steps 2 and 3 should cancel or give me the final shares result and the sell logic should work fine
+    ORDER
+        To ensure that transactions happen in the proper order, I should sort the new raw transactions by type and enter from there
+        
+    '''
     # Start processing the data and inserting it into te processed transactions table
     # If there is a transaction that went CIL, just say that we sold all the shares we had and use the CIL amount as the cost basis sell
 
