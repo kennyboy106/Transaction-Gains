@@ -67,26 +67,35 @@ for page in doc:
         2. Try getting all information if it hasn't already been acquired with that account number
         '''
         
-        # if 'Acct' in text:
-        #     # Do stuff for this account page
-        #     pass
+        if 'Acct' in text:
+            try:
+                acc_number = ret[i + 2][4]  # Get the account number which should be after the following # sign
+                acc_number = acc_number.replace(')', '')    # Remove the ) that follows
+                acc_number = acc_number[-4:]    # Keep only the last 4 numbers of the account
+                if int(acc_number):
+                    pass
+                # TODO I need to put a flag here that indicates that this page is good to start extracting info from
+            # Do stuff for this account page
+            
+            except:
+                pass
         
-        # # Nothing on this page? Go to the next page
-        # else:
-        #     break
+        # Nothing on this page? Go to the next page
+        else:
+            break
         
 
 
 
 # -------------------- # Extract the statement ending date # ---------------- #
-        if not year and text == 'Statement':
-            try:
-                if ret[i + 1][4] == 'Period:':
-                    month = ret[i + 2][4].lower()
-                    day = ret[i + 6][4][:-1]
-                    year = ret[i + 7][4]
-                    if Months[month] and int(day) and int(year):
-                        print('Date acquired')
-            except:
-                month, day, year = (None,) * 3
+# if not year and text == 'Statement':
+#     try:
+#         if ret[i + 1][4] == 'Period:':
+#             month = ret[i + 2][4].lower()
+#             day = ret[i + 6][4][:-1]
+#             year = ret[i + 7][4]
+#             if Months[month] and int(day) and int(year):
+#                 print('Date acquired')
+#     except:
+#         month, day, year = (None,) * 3
         
