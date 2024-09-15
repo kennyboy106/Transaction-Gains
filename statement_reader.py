@@ -154,8 +154,6 @@ def chase_statement_extract(filename: str):
     doc.close()
     return statement_data
 
-
-
 def schwab_statement_extract(filename: str):
     '''
     Extracts information from charles schwab brokerage statements using pymupdf library.
@@ -284,7 +282,6 @@ def schwab_statement_extract(filename: str):
             
     doc.close()
     return statement_data
-
 
 if __name__ == '__main__':
     chase_file = 'chase_multi_20240831-statements-8722-.pdf'
