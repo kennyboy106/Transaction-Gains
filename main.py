@@ -33,6 +33,7 @@ def create_db():
     # Initialize a table for raw transactions
     sql_statement = [
         """CREATE TABLE IF NOT EXISTS raw_transactions(
+            transaction_id INTEGER PRIMARY KEY,
             broker TEXT NOT NULL,
             date TEXT,
             account_name TEXT,
@@ -62,12 +63,7 @@ def create_db():
             ticker TEXT NOT NULL,
             date_inserted TEXT NOT NULL, 
             date_modified TEXT NOT NULL,
-            UNIQUE(cusip))""",
-        """CREATE TABLE IF NOT EXISTS holdings(
-            [reference to buy transaction],
-            cost_per_share REAL,
-            split TEXT,
-            [reference to sell transaction])"""
+            UNIQUE(cusip))"""
         ]
     try:
         for statement in sql_statement:
@@ -118,14 +114,16 @@ def insert_raw_transactions(file_name: str, con: sqlite3.Connection, cur: sqlite
                     row['Account Number'], row['Type'],
                     row['Cusip'], row['Ticker'],
                     row['Price USD'], row['Quantity'],)
-            cur.execute("""INSERT INTO raw_transactions VALUES(
-                        'Chase', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))""", data)
+            cur.execute("""INSERT INTO raw_transactions 
+                        (broker, date, account_name, account_number, type, cusip, ticker, cost_basis, qty, date_inserted, date_modified) 
+                        VALUES('Chase', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))""", data)
 
             # Save the cusip and ticker pair if present
             if data[4] and data[5]:
-                cur.execute("""INSERT INTO cusip_ticker VALUES(
-                            ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime')) 
-                            ON CONFLICT(cusip) DO NOTHING""", (data[4], data[5]))    
+                cur.execute("""INSERT INTO cusip_ticker 
+                            (cusip, ticker, date_inserted, date_modified)
+                            VALUES(?, ?, datetime('now', 'localtime'), datetime('now', 'localtime')) 
+                            ON CONFLICT(cusip) DO NOTHING""", (data[4], data[5]))
             
         # Commit changes after adding all data from the csv. If an error occurs, no data will write
         con.commit()
@@ -158,12 +156,12 @@ if __name__ == "__main__":
     # Import data from CSVs, for now, just from chase or fidelity
 
     # FOR CHASE #
-    # chase_process_transactions('transactions.csv', con, cur)
+    chase_process_transactions('transactions.csv', con, cur)
     
-    # Calculating captial gains
+    # Calculating capital gains
     '''
     Intermediate table that has buy and sell transactions
-    If I sell, check for oldest buy that isnt closed out
+    If I sell, check for oldest buy that isn't closed out
         If it is closed out, find next oldest and use that
         If I sell all shares from that buy, close out the buy and move on to next oldest for remaining shares
     If rsa transaction, delete shares and add back later (there should be 2 per reverse or CIL)
@@ -173,6 +171,16 @@ if __name__ == "__main__":
             In the end, steps 2 and 3 should cancel or give me the final shares result and the sell logic should work fine
     ORDER
         To ensure that transactions happen in the proper order, I should sort the new raw transactions by type and enter from there
+
+    To do this I can have a table structure of:
+    [reference to transaction] [cost per share] [split] [shares adjusted] [shares sold]
+    
+        """CREATE TABLE IF NOT EXISTS holdings(
+            transaction_id INTEGER NOT NULL,
+            cost_per_share REAL,
+            split TEXT,
+            shares_adjusted REAL,
+            shares_sold REAL)"""
         
     '''
     # Start processing the data and inserting it into te processed transactions table

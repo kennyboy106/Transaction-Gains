@@ -3,3 +3,7 @@ transactions*
 *.csv*
 Ref
 .vscode
+.venv
+*.pdf
+*.PDF
+*.txt
