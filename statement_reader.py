@@ -250,15 +250,22 @@ def schwab_statement_extract(filename: str):
 
             # Extract the previous period value and current value
             if cur_period_value == None and text == 'Ending':
+                # Try for current value
                 try:
                     if ret[i + 1][4] == 'Value':
-                        prev_period_value = ret[i + 3][4].replace('$', '')
                         cur_period_value = ret[i + 2][4].replace('$', '')
-                        statement_data[acc_number]['prev_period_val'] = float(prev_period_value)
                         statement_data[acc_number]['cur_period_val'] = float(cur_period_value)
                 except:
                     cur_period_value = None
-            
+
+                # Try for previous value. This is not available if it's the first statement on the account
+                try:
+                    if ret[i + 1][4] == 'Value':
+                        prev_period_value = ret[i + 3][4].replace('$', '')
+                        statement_data[acc_number]['prev_period_val'] = float(prev_period_value)
+                except:
+                    prev_period_value = None
+
             # Extract the short and long term gains
             if short_term_net_gains == None and text == '(ST)':
                 try:
@@ -280,9 +287,11 @@ def schwab_statement_extract(filename: str):
 
 
 if __name__ == '__main__':
-    chase_file = 'chase_single_20240831-statements-8722-.pdf'
+    chase_file = 'chase_multi_20240831-statements-8722-.pdf'
     good_schwab_file = 'good_Schwab_Brokerage Statement_2024-08-31_111.PDF'
     bad_schwab_file = 'bad_Schwab_Brokerage Statement_2024-08-31_615.PDF'
-    # chase_statement_extract(chase_file)
-    print(schwab_statement_extract(good_schwab_file))
+    chase_data = chase_statement_extract(chase_file)
+    for key in chase_data:
+        print(chase_data[key])
+    # print(schwab_statement_extract(bad_schwab_file))
     
