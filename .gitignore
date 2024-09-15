@@ -5,4 +5,5 @@ Ref
 .vscode
 .venv
 *.pdf
+*.PDF
 *.txt
