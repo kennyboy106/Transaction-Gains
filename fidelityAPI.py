@@ -19,20 +19,11 @@ except:
     print('Could not get username and password')
     exit()
 
+# Configure the browser
 playwright = sync_playwright().start()
 browser = playwright.chromium.launch(headless=False)
 context = browser.new_context()
-cookies_loaded = False
-try:
-    f = open('fidelity_cookies.json')
-    cookies = json.load(f)
-    context.add_cookies(cookies)
-    cookies_loaded = True
-    print("Cookies loaded")
-except FileNotFoundError:
-    print("File not found")
-except json.JSONDecodeError:
-    print("Error decoding")
+
     
 page = context.new_page()
 stealth_config = StealthConfig(
@@ -42,6 +33,7 @@ stealth_config = StealthConfig(
         )
 stealth_sync(page, stealth_config)
 
+# Start going to pages
 page.goto("https://digital.fidelity.com/prgw/digital/login/full-page")
 
 # Login page
@@ -50,13 +42,33 @@ page.get_by_label("Username", exact=True).fill(username)
 page.get_by_label("Password", exact=True).click()
 page.get_by_label("Password", exact=True).fill(password)
 page.get_by_role("button", name="Log in").click()
+try:
+    page.wait_for_url('https://digital.fidelity.com/ftgw/digital/portfolio/summary', timeout=5000)
+except PlaywrightTimeoutError:
+    pass
+if 'login' in page.url:
+    try:
+        page.locator("label").filter(has_text="Don't ask me again on this").check()
 
-page.locator("label").filter(has_text="Don't ask me again on this").check()
+        assert page.locator("label").filter(has_text="Don't ask me again on this").is_checked()
+
+        page.get_by_role("link", name="Try another way").click()
+        # assert (page.get_by_role("heading", name="To verify it's you, we'll")).is_visible()
+        page.get_by_role("button", name="Text me the code").click()
+        page.get_by_placeholder("XXXXXX").click()
+        code = input('Enter the code')
+        page.get_by_placeholder("XXXXXX").fill(code)
+        page.locator("label").filter(has_text="Don't ask me again on this").check()
+        assert page.locator("label").filter(has_text="Don't ask me again on this").is_checked()
+        page.get_by_role("button", name="Submit").click()
+
+    except Exception as e:
+        print(e)
+elif 'summary' not in page.url:
+    raise Exception("Cannot get to login page. Maybe other 2FA method present")
+
 
 page.pause()
-
-
-
 '''
 import re
 from playwright.sync_api import Playwright, sync_playwright, expect
