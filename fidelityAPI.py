@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import StealthConfig, stealth_sync  
-
+import csv
 
 class FidelityAutomation:
     def __init__(self, headless) -> None:
@@ -100,18 +100,71 @@ class FidelityAutomation:
         # Enable extended hours trading if available
         if self.page.locator(".eq-ticket_extendedhour_toggle-item").is_visible():
             self.page.locator(".eq-ticket_extendedhour_toggle-item").check()
-
+    
+    def getAccountInfo(self):
+        self.page.goto('https://digital.fidelity.com/ftgw/digital/portfolio/positions')
         
+        with self.page.expect_download() as download_info:
+            self.page.get_by_label("Download Positions").click()
+        download = download_info.value
+        cur = os.getcwd()
+        file_path = os.path.join(cur, download.suggested_filename)
+        download.save_as(file_path)
+        
+        self.positions_csv = open(file_path, newline='', encoding='utf-8-sig')
+
+        reader = csv.DictReader(self.positions_csv)
+        # Ensure all fields we want are present
+        required_elements = ['Account Number', 'Account Name', 'Symbol', 'Description', 'Quantity', 'Last Price', 'Current Value']
+        intersection_set = set(reader.fieldnames).intersection(set(required_elements))
+        if len(intersection_set) != len(required_elements):
+            raise Exception('Not enough elements in fidelity positions csv')
+        
+        account_dict = {}
+        for row in reader:
+            val = row['Current Value'].replace('$','')
+            if account_dict[row['Account Number']] == None:
+                account_dict[row['Account Number']] = {'balance': val, 'type': row['Account Name']}
+            else:
+                account_dict[row['Account Number']]['balance'] += val
+        print(account_dict)
+        self.positions_csv.close()
+        os.remove(file_path)
+
+
+positions_csv = open('/data/Projects/RSA-Transaction-Gains/Portfolio_Positions_Sep-16-2024.csv', newline='', encoding='utf-8-sig')
+
+reader = csv.DictReader(positions_csv)
+# Ensure all fields we want are present
+required_elements = ['Account Number', 'Account Name', 'Symbol', 'Description', 'Quantity', 'Last Price', 'Current Value']
+intersection_set = set(reader.fieldnames).intersection(set(required_elements))
+if len(intersection_set) != len(required_elements):
+    raise Exception('Not enough elements in fidelity positions csv')
+
+account_dict = {}
+for row in reader:
+    # Last couple of rows have some disclaimers, filter those out
+    if row['Account Number'] != None and 'and' in str(row['Account Number']):
+        break
+    val = str(row['Current Value']).replace('$','')
+    if len(val) == 0:
+        continue
+    if row['Account Number'] not in account_dict:
+        account_dict[row['Account Number']] = {'balance': float(val), 'type': row['Account Name']}
+    else:
+        account_dict[row['Account Number']]['balance'] += float(val)
+positions_csv.close()
 
 # Create fidelity driver class
-fid = FidelityAutomation(False)
-try:
-    fid.fidelitylogin()
-    fid.fidelitytransaction()
-except Exception as e:
-    print(e)
+# fid = FidelityAutomation(False)
+# try:
+    # fid.fidelitylogin()
+    # fid.fidelitytransaction()
+    # fid.getAccountInfo()
+# except Exception as e:
+#     print(e)
 
-fid.page.pause()
+# fid.page.pause()
 '''
 # Get login info
 try:
