@@ -108,7 +108,8 @@ class FidelityAutomation:
         # Click on the drop down
         self.page.query_selector("#dest-acct-dropdown").click()
         # Find the account to trade under
-        self.page.get_by_role("option", name=account).click()
+        self.page.get_by_role("option").filter(has_text=account).click()
+
         # Enter the symbol
         self.page.get_by_label("Symbol").click()
         # Fill in the ticker
@@ -148,6 +149,27 @@ class FidelityAutomation:
         self.page.get_by_text("Day", exact=True).click()
         # Continue with the order
         self.page.get_by_role("button", name="Preview order").click()
+
+        # If error occurred
+        try:
+            self.page.get_by_role("button", name="Place order clicking this").wait_for(timeout=1500)
+        except PlaywrightTimeoutError:
+            # Error must be present (or really slow page for some reason)
+            # Try to report on error
+            error_message = self.page.get_by_label("Error").locator("div").filter(has_text="critical").text_content()
+            print(error_message)
+            self.page.get_by_role("button", name="Close dialog").click()
+        
+        # If no error occurred, continue with checking and buy
+        try:
+            assert self.page.locator("preview").filter(has_text=account).is_visible()
+            assert self.page.get_by_text(f"Symbol{stock.upper()}", exact=True).is_visible()
+            assert self.page.get_by_text(f"Action{action.title()}").is_visible()
+            assert self.page.get_by_text(f"Quantity{'%.2f' % wanted_price}").is_visible()
+        except AssertionError:
+            print(f'Order preview is not what is expected')
+
+
     
     def getAccountInfo(self):
         self.page.goto('https://digital.fidelity.com/ftgw/digital/portfolio/positions')
@@ -190,7 +212,8 @@ try:
     for acc in accounts:
         acc = acc.split(':')
         fid.fidelitylogin(acc[0], acc[1])
-    fid.fidelitytransaction('aabb', 1, 'buy', 'Individual 12 (Z32228331)')
+        # Individual 12 (Z32228331)
+    fid.fidelitytransaction('aabb', 1, 'buy', 'Z32228331')
     # fid.getAccountInfo()
 except Exception as e:
     print(e)
