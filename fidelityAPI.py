@@ -27,22 +27,22 @@ class FidelityAutomation:
         # Set the context wrapper
         self.playwright = sync_playwright().start()
         # Launch the browser
-        self.browser = self.playwright.chromium.launch(headless=self.headless)
+        self.browser = self.playwright.firefox.launch(headless=self.headless, args=["--disable-webgl", "--disable-software-rasterizer"])
         self.context = self.browser.new_context()
         self.page = self.context.new_page()
         # Apply stealth settings
         stealth_sync(self.page, self.stealth_config)
 
-    def fidelitylogin(self) -> bool:
+    def fidelitylogin(self, username: str, password: str) -> bool:
         try:
             # Go to the login page
             self.page.goto("https://digital.fidelity.com/prgw/digital/login/full-page")
 
             # Login page
             self.page.get_by_label("Username", exact=True).click()
-            self.page.get_by_label("Username", exact=True).fill(self.username)
+            self.page.get_by_label("Username", exact=True).fill(username)
             self.page.get_by_label("Password", exact=True).click()
-            self.page.get_by_label("Password", exact=True).fill(self.password)
+            self.page.get_by_label("Password", exact=True).fill(password)
             self.page.get_by_role("button", name="Log in").click()
             try:
                 # See if we got to the summary page
@@ -94,12 +94,60 @@ class FidelityAutomation:
             traceback.print_exc() 
             return False
 
-    def fidelitytransaction(self) -> bool:
-        self.page.goto('https://digital.fidelity.com/ftgw/digital/trade-equity')
+    def fidelitytransaction(self, stock: str, quantity: float, action: str, account: str) -> bool:
+        # Go to the trade page
+        if self.page.url != 'https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry':
+            self.page.goto('https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry')
+        
+        # Ensure we are in the simplified ticket
+        if self.page.get_by_role("button", name="View simplified ticket").is_visible():
+            self.page.get_by_role("button", name="View simplified ticket").click()
+            # Wait for it to take effect
+            self.page.get_by_text("Buy", exact=True).wait_for(timeout=2000)
+        
+        # Click on the drop down
+        self.page.query_selector("#dest-acct-dropdown").click()
+        # Find the account to trade under
+        self.page.get_by_role("option", name=account).click()
+        # Enter the symbol
+        self.page.get_by_label("Symbol").click()
+        # Fill in the ticker
+        self.page.get_by_label("Symbol").fill(stock)
+        # Find the symbol we wanted and click it
+        self.page.get_by_text(stock.upper(), exact=True).click()
 
+        # Wait for quote panel to show up
+        self.page.locator("#quote-panel").wait_for(timeout=2000)
+        last_price = self.page.query_selector("#eq-ticket__last-price > span.last-price").text_content()
+        last_price = last_price.replace('$','')
         # Enable extended hours trading if available
         if self.page.locator(".eq-ticket_extendedhour_toggle-item").is_visible():
             self.page.locator(".eq-ticket_extendedhour_toggle-item").check()
+        
+        # Press the buy or sell button. Title capitalizes the first letter so 'buy' -> 'Buy'
+        self.page.locator("label").filter(has_text=action.title()).click()
+        # Press the shares text box
+        self.page.locator("label").filter(has_text="Shares").click()
+        self.page.get_by_text("Share amount").click()
+        self.page.get_by_label("Share amount").fill(str(quantity))
+        # If it should be limit
+        if float(last_price) < 1 and action.lower() == 'buy':
+            difference_price = 0.01 if float(last_price) > 0.1 else 0.0001
+            wanted_price = round(float(last_price) + difference_price, 3)
+            # Click on the limit
+            self.page.locator("label").filter(has_text="Limit").click()
+            # Enter the limit price
+            self.page.get_by_text("Limit price").click()
+            self.page.get_by_label("Limit price").fill(str(wanted_price))
+        # Otherwise its market
+        else:
+            # Click on the limit
+            self.page.locator("label").filter(has_text="Market").click()
+
+        # Ensure its a day trade
+        self.page.get_by_text("Day", exact=True).click()
+        # Continue with the order
+        self.page.get_by_role("button", name="Preview order").click()
     
     def getAccountInfo(self):
         self.page.goto('https://digital.fidelity.com/ftgw/digital/portfolio/positions')
@@ -132,39 +180,64 @@ class FidelityAutomation:
         os.remove(file_path)
 
 
-positions_csv = open('/data/Projects/RSA-Transaction-Gains/Portfolio_Positions_Sep-16-2024.csv', newline='', encoding='utf-8-sig')
 
-reader = csv.DictReader(positions_csv)
-# Ensure all fields we want are present
-required_elements = ['Account Number', 'Account Name', 'Symbol', 'Description', 'Quantity', 'Last Price', 'Current Value']
-intersection_set = set(reader.fieldnames).intersection(set(required_elements))
-if len(intersection_set) != len(required_elements):
-    raise Exception('Not enough elements in fidelity positions csv')
 
-account_dict = {}
-for row in reader:
-    # Last couple of rows have some disclaimers, filter those out
-    if row['Account Number'] != None and 'and' in str(row['Account Number']):
-        break
-    val = str(row['Current Value']).replace('$','')
-    if len(val) == 0:
-        continue
-    if row['Account Number'] not in account_dict:
-        account_dict[row['Account Number']] = {'balance': float(val), 'type': row['Account Name']}
-    else:
-        account_dict[row['Account Number']]['balance'] += float(val)
-positions_csv.close()
 
 # Create fidelity driver class
-# fid = FidelityAutomation(False)
-# try:
-    # fid.fidelitylogin()
-    # fid.fidelitytransaction()
+fid = FidelityAutomation(False)
+try:
+    accounts = (os.environ["FIDELITY"].strip().split(","))
+    for acc in accounts:
+        acc = acc.split(':')
+        fid.fidelitylogin(acc[0], acc[1])
+    fid.fidelitytransaction('aabb', 1, 'buy', 'Individual 12 (Z32228331)')
     # fid.getAccountInfo()
-# except Exception as e:
-#     print(e)
+except Exception as e:
+    print(e)
+fid.page.pause()
+# Try clicking on
+# #dest-acct-dropdown
+'''
+# Go to the trade page
+fid.page.goto('https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry')
+# TODO make sure we are on the simplified ticket
+# Click on the drop down
+fid.page.query_selector("#dest-acct-dropdown").click()
+# Find the account to trade under
+fid.page.get_by_role("option", name="Individual 12 (Z32228331)").click()
+# Enter the symbol
+fid.page.get_by_label("Symbol").click()
+# Fill in the ticker
+fid.page.get_by_label("Symbol").fill("aabb")
+# Find the symbol we wanted and click it
+fid.page.get_by_text("AABB", exact=True).click()
+
+# Press the buy or sell button
+fid.page.get_by_text("Buy", exact=True).click()
+# Press the shares text box
+fid.page.get_by_text("Shares", exact=True).click()
+fid.page.get_by_text("Share amount").click()
+fid.page.get_by_label("Share amount").fill("1")
+# Need to find the price
+# Click on the limit or market option
+fid.page.get_by_text("Limit", exact=True).click()
+# Enter the limit price
+fid.page.get_by_text("Limit price").click()
+fid.page.get_by_label("Limit price").fill("1")
+# Ensure its a day trade
+fid.page.get_by_text("Day", exact=True).click()
+# Continue with the order
+fid.page.get_by_role("button", name="Preview order").click()
+
 
 # fid.page.pause()
+# fid.page.locator("#quote-panel").is_visible()
+fid.page.locator("#quote-panel").wait_for(timeout=2000)
+print(fid.page.query_selector("#eq-ticket__last-price > span.last-price").text_content())
+
+
+fid.page.pause()
+'''
 '''
 # Get login info
 try:
