@@ -96,7 +96,23 @@ class FidelityAutomation:
 
     def fidelitytransaction(self, stock: str, quantity: float, action: str, account: str, dry: bool=True) -> bool:
         '''
-        TODO after return on error, trim the error message down a lot. There is a lot of whitespace. Its all whitespace
+        Process an order (transaction) using the dedicated trading page.
+        For buying:
+            If the price of the security is below $1, it will choose limit order and go off of the last price + a little
+        For selling:
+            Places a market order for the security
+
+        Parameters:
+            stock: str: The ticker that represents the security to be traded
+            quantity: float: The amount to buy or sell of the security
+            action: str: This must be 'buy' or 'sell'. It can be in any case state (i.e. 'bUY' is still valid)
+            account: str: The account number to trade under.
+            dry: bool: True for dry (test) run, False for real run.
+            
+        Returns:
+            (Success: bool, Error_message: str) If the order was successfully placed or tested (for dry runs) then True is
+            returned and Error_message will be None. Otherwise, False will be returned and Error_message will not be None
+
         
         '''
         try:
@@ -113,7 +129,7 @@ class FidelityAutomation:
             # Click on the drop down
             self.page.query_selector("#dest-acct-dropdown").click()
             # Find the account to trade under
-            self.page.get_by_role("option").filter(has_text=account).click()
+            self.page.get_by_role("option").filter(has_text=account.upper()).click()
 
             # Enter the symbol
             self.page.get_by_label("Symbol").click()
@@ -131,7 +147,7 @@ class FidelityAutomation:
                 self.page.locator(".eq-ticket_extendedhour_toggle-item").check()
             
             # Press the buy or sell button. Title capitalizes the first letter so 'buy' -> 'Buy'
-            self.page.locator("label").filter(has_text=action.title()).click()
+            self.page.locator("label").filter(has_text=action.lower().title()).click()
             # Press the shares text box
             self.page.locator("label").filter(has_text="Shares").click()
             self.page.get_by_text("Share amount").click()
@@ -162,22 +178,27 @@ class FidelityAutomation:
             except PlaywrightTimeoutError:
                 # Error must be present (or really slow page for some reason)
                 # Try to report on error
-                error_message = None
+                error_message = 'Could not retrieve error message from popup'
+                filtered_error = ''
                 try:
                     error_message = self.page.get_by_label("Error").locator("div").filter(has_text="critical").nth(2).text_content()            
                     self.page.get_by_role("button", name="Close dialog").click()
-                    
                 except:
                     pass
-                # Return with error
-                print("Error occurred")
+                # Return with error and trim it down (it contains many spaces for some reason)
+                if error_message != None:
+                    for i, character in enumerate(error_message):
+                        if i == 0 or (character == ' ' and error_message[i - 1] == ' '):
+                            continue
+                        filtered_error += character
+                            
                 return (False, error_message)
             
             # If no error occurred, continue with checking and buy/sell
             try:
-                assert self.page.locator("preview").filter(has_text=account).is_visible()
+                assert self.page.locator("preview").filter(has_text=account.upper()).is_visible()
                 assert self.page.get_by_text(f"Symbol{stock.upper()}", exact=True).is_visible()
-                assert self.page.get_by_text(f"Action{action.title()}").is_visible()
+                assert self.page.get_by_text(f"Action{action.lower().title()}").is_visible()
                 assert self.page.get_by_text(f"Quantity{quantity}").is_visible()
             except AssertionError:
                 return (False, 'Order preview is not what is expected')

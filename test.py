@@ -296,5 +296,3 @@ def fidelity_init_2(account: str, index: int, headless=True, botObj=None, loop=N
         print(f"Error logging in to Fidelity: {e}")
         print(traceback.format_exc())
         return None
-    
-fidelity_run()
