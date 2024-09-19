@@ -6,6 +6,7 @@ from datetime import datetime
 from time import sleep
 from dotenv import load_dotenv
 import pyotp
+import time
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import StealthConfig, stealth_sync  
@@ -34,7 +35,7 @@ class FidelityAutomation:
         # Apply stealth settings
         stealth_sync(self.page, self.stealth_config)
 
-    def fidelitylogin(self, username: str, password: str, totp_secret=None) -> bool:
+    def fidelitylogin(self, username: str, password: str, totp_secret: str=None) -> bool:
         try:
             # Go to the login page
             self.page.goto("https://digital.fidelity.com/prgw/digital/login/full-page")
@@ -144,11 +145,11 @@ class FidelityAutomation:
             if self.page.url != 'https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry':
                 self.page.goto('https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry')
             
-            # Ensure we are in the simplified ticket
-            if self.page.get_by_role("button", name="View simplified ticket").is_visible():
-                self.page.get_by_role("button", name="View simplified ticket").click()
+            # Ensure we are in the expanded ticket
+            if self.page.get_by_role("button", name="View expanded ticket").is_visible():
+                self.page.get_by_role("button", name="View expanded ticket").click()
                 # Wait for it to take effect
-                self.page.get_by_text("Buy", exact=True).wait_for(timeout=2000)
+                self.page.get_by_role("button", name="Calculate shares").wait_for(timeout=2000)
             
             # Click on the drop down
             self.page.query_selector("#dest-acct-dropdown").click()
@@ -174,39 +175,57 @@ class FidelityAutomation:
             self.page.locator("#quote-panel").wait_for(timeout=2000)
             last_price = self.page.query_selector("#eq-ticket__last-price > span.last-price").text_content()
             last_price = last_price.replace('$','')
+
+            # When enabling extended hour trading
+            extended = False
+            precision = 3
             # Enable extended hours trading if available
-            if self.page.locator(".eq-ticket_extendedhour_toggle-item").is_visible():
-                self.page.locator(".eq-ticket_extendedhour_toggle-item").check()
+            if self.page.get_by_text("Extended hours trading").is_visible():
+                if self.page.get_by_text("Extended hours trading: OffUntil 8:00 PM ET").is_visible():
+                    self.page.get_by_text("Extended hours trading: OffUntil 8:00 PM ET").check()
+                extended = True
+                precision = 2
+
             
             # Press the buy or sell button. Title capitalizes the first letter so 'buy' -> 'Buy'
-            self.page.locator("label").filter(has_text=action.lower().title()).click()
+            self.page.locator("#order-action-input-container").click()
+            self.page.get_by_role("option", name=action.lower().title()).wait_for()
+            time.sleep(0.3)
+            self.page.get_by_role("option", name=action.lower().title()).click()
+            
+
             # Press the shares text box
-            self.page.locator("label").filter(has_text="Shares").click()
-            self.page.get_by_text("Share amount").click()
-            self.page.get_by_label("Share amount").fill(str(quantity))
+            self.page.locator("#eqt-mts-stock-quatity div").filter(has_text="Quantity").click()
+            self.page.get_by_label("you own").fill(str(quantity))
+
             # If it should be limit
-            if float(last_price) < 1:
+            if float(last_price) < 1 or extended:
                 # Buy above
                 if action.lower() == 'buy':
                     difference_price = 0.01 if float(last_price) > 0.1 else 0.0001
-                    wanted_price = round(float(last_price) + difference_price, 3)
+                    wanted_price = round(float(last_price) + difference_price, precision)
                 # Sell below
                 else:
                     difference_price = 0.01 if float(last_price) > 0.1 else 0.0001
-                    wanted_price = round(float(last_price) - difference_price, 3)
-                # Click on the limit
-                self.page.locator("#market-no label").click()
+                    wanted_price = round(float(last_price) - difference_price, precision)
+                
+                # Click on the limit default option when in extended hours
+                self.page.locator("#order-type-container-id").click()
+                self.page.get_by_role("option", name="Limit").click()
                 # Enter the limit price
                 self.page.get_by_text("Limit price").click()
                 self.page.get_by_label("Limit price").fill(str(wanted_price))
             # Otherwise its market
             else:
-                # Click on the limit
-                self.page.locator("label").filter(has_text="Market").click()
+                # Click on the market
+                self.page.locator("#order-type-container-id").click()
+                self.page.get_by_role("option", name="Market").click()
 
-            # Ensure its a day trade
-            if self.page.get_by_text("Day", exact=True).is_visible():
-                self.page.get_by_text("Day", exact=True).click()
+            # # Ensure its a day trade (default option when extended hours trading)
+            # if not self.page.get_by_role("button", name="Time in force Day").is_visible():
+            #     self.page.locator("dropdownlist-ett-ap122489").filter(has_text="Time in force").click()
+            #     self.page.get_by_role("option", name="Day").click()
+
             # Continue with the order
             self.page.get_by_role("button", name="Preview order").click()
 
@@ -254,41 +273,91 @@ class FidelityAutomation:
                     return (False, 'Order failed to complete')
             # If its a dry run, report back success
             return (True, None)
-        except PlaywrightTimeoutError:
-            return (False, 'Driver timed out. Order not complete')
+        # except PlaywrightTimeoutError:
+        #     return (False, 'Driver timed out. Order not complete')
         except Exception as e:
             return (False, e)
 
     
     def getAccountInfo(self):
+        '''
+        Gets account numbers, account names, and account totals by downloading the csv of positions from fidelity.
+        The file path of the downloaded csv is saved to self.positions_csv and can be deleted later.
+
+        Post Conditions:
+            self.positions_csv: The absolute file path to the downloaded csv file of positions for all accounts
+        Returns:
+            account_dict: dict: A dictionary using account numbers as keys. Each key holds a dict which has
+            'balance': float: Total account balance
+            'type': str: The account nickname or default name
+        '''
+        # Go to positions page
         self.page.goto('https://digital.fidelity.com/ftgw/digital/portfolio/positions')
         
+        # Download the positions as a csv
         with self.page.expect_download() as download_info:
             self.page.get_by_label("Download Positions").click()
         download = download_info.value
         cur = os.getcwd()
-        file_path = os.path.join(cur, download.suggested_filename)
-        download.save_as(file_path)
-        
-        self.positions_csv = open(file_path, newline='', encoding='utf-8-sig')
+        self.positions_csv = os.path.join(cur, download.suggested_filename)
+        # Create a copy to work on with the proper file name known
+        download.save_as(self.positions_csv)
 
-        reader = csv.DictReader(self.positions_csv)
+        csv_file = open(self.positions_csv, newline='', encoding='utf-8-sig')
+
+        reader = csv.DictReader(csv_file)
         # Ensure all fields we want are present
         required_elements = ['Account Number', 'Account Name', 'Symbol', 'Description', 'Quantity', 'Last Price', 'Current Value']
         intersection_set = set(reader.fieldnames).intersection(set(required_elements))
         if len(intersection_set) != len(required_elements):
             raise Exception('Not enough elements in fidelity positions csv')
         
-        account_dict = {}
+        self.account_dict = {}
         for row in reader:
-            val = row['Current Value'].replace('$','')
-            if account_dict[row['Account Number']] == None:
-                account_dict[row['Account Number']] = {'balance': val, 'type': row['Account Name']}
-            else:
-                account_dict[row['Account Number']]['balance'] += val
-        print(account_dict)
-        self.positions_csv.close()
-        os.remove(file_path)
+                # Last couple of rows have some disclaimers, filter those out
+                if row['Account Number'] != None and 'and' in str(row['Account Number']):
+                    break
+                # Get the value and remove '$' from it
+                val = str(row['Current Value']).replace('$','')
+                # Get the last price
+                last_price = str(row['Last Price']).replace('$', '')
+                # Get quantity
+                quantity = row['Quantity']
+                # Get ticker
+                ticker = str(row['Symbol'])
+                
+                # Don't include this if present
+                if 'Pending' in ticker:
+                    continue
+                # If the value isn't present, move to next row
+                if len(val) == 0:
+                    continue
+                # If the last price isn't available, just use the current value
+                if len(last_price) == 0:
+                    last_price = val
+                # If the quantity is missing, just use 1
+                if len(quantity) == 0:
+                    quantity = 1
+                
+                # If the account number isn't populated yet, add it
+                if row['Account Number'] not in self.account_dict:
+                    # Add retrieved info.
+                    # Yeah I know is kinda messy and hard to think about but it works
+                    # Just need a way to store all stocks with the account number
+                    # 'stocks' is a list of dictionaries. Each ticker gets its own index and is described by a dictionary
+                    self.account_dict[row['Account Number']] = {'balance': float(val), 'type': row['Account Name'],
+                                                                'stocks': [{'ticker': ticker, 'quantity': quantity, 'last_price': last_price, 'value': val}]
+                                                                }
+                # If it is present, add to it
+                else:
+                    self.account_dict[row['Account Number']]['stocks'].append({'ticker': ticker, 'quantity': quantity, 'last_price': last_price, 'value': val})
+                    self.account_dict[row['Account Number']]['balance'] += float(val)
+        
+        # Close the file
+        csv_file.close()
+        os.remove(self.positions_csv)
+
+        return self.account_dict
 
 
 
@@ -301,8 +370,16 @@ try:
     for acc in accounts:
         acc = acc.split(':')
         fid.fidelitylogin(acc[0], acc[1], acc[2])
-    # fid.getAccountInfo()
+    
+    for stock in ('rsls', 'otrk'):
+        for key in fid.getAccountInfo():    
+            success, msg = fid.fidelitytransaction(stock, 1.0, 'buy', key, 'True')
+            if not success:
+                print(msg)
+                raise Exception("Go look, we failed")
+    # print(fid.fidelitytransaction('rsls', 1.0, 'buy', 'Z09449756', 'True'))
 except Exception as e:
+
     print(e)
 fid.page.pause()
 # Try clicking on
