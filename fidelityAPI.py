@@ -174,7 +174,7 @@ class FidelityAutomation:
 
             # If error occurred
             try:
-                self.page.get_by_role("button", name="Place order clicking this").wait_for(timeout=1500, state='visible')
+                self.page.get_by_role("button", name="Place order clicking this").wait_for(timeout=4000, state='visible')
             except PlaywrightTimeoutError:
                 # Error must be present (or really slow page for some reason)
                 # Try to report on error
