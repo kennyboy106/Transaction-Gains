@@ -136,7 +136,7 @@ class FidelityAutomation:
             # Fill in the ticker
             self.page.get_by_label("Symbol").fill(stock)
             # Find the symbol we wanted and click it
-            self.page.get_by_text(stock.upper(), exact=True).click()
+            self.page.get_by_label("Symbol").press("Enter")
 
             # Wait for quote panel to show up
             self.page.locator("#quote-panel").wait_for(timeout=2000)
@@ -157,7 +157,7 @@ class FidelityAutomation:
                 difference_price = 0.01 if float(last_price) > 0.1 else 0.0001
                 wanted_price = round(float(last_price) + difference_price, 3)
                 # Click on the limit
-                self.page.locator("label").filter(has_text="Limit").click()
+                self.page.locator("#market-no label").click()
                 # Enter the limit price
                 self.page.get_by_text("Limit price").click()
                 self.page.get_by_label("Limit price").fill(str(wanted_price))
@@ -264,9 +264,11 @@ try:
         acc = acc.split(':')
         fid.fidelitylogin(acc[0], acc[1])
         # Individual 12 (Z32228331)
-    success, message = fid.fidelitytransaction('intc', 1, 'sell', 'Z09449756', False)
-    if not success:
-        print(message)
+    acnum = ('Z32228331', 'Z09449756')
+    for ac in acnum:
+        success, message = fid.fidelitytransaction('TRAW', 1, 'buy', ac, True)
+        if not success:
+            print(message)
     # fid.getAccountInfo()
 except Exception as e:
     print(e)
