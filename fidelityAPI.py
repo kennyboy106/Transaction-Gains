@@ -144,13 +144,7 @@ class FidelityAutomation:
             # Go to the trade page
             if self.page.url != 'https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry':
                 self.page.goto('https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry')
-            
-            # Ensure we are in the expanded ticket
-            if self.page.get_by_role("button", name="View expanded ticket").is_visible():
-                self.page.get_by_role("button", name="View expanded ticket").click()
-                # Wait for it to take effect
-                self.page.get_by_role("button", name="Calculate shares").wait_for(timeout=2000)
-            
+
             # Click on the drop down
             self.page.query_selector("#dest-acct-dropdown").click()
             
@@ -176,6 +170,13 @@ class FidelityAutomation:
             last_price = self.page.query_selector("#eq-ticket__last-price > span.last-price").text_content()
             last_price = last_price.replace('$','')
 
+            # Ensure we are in the expanded ticket
+            if self.page.get_by_role("button", name="View expanded ticket").is_visible():
+                self.page.get_by_role("button", name="View expanded ticket").click()
+                # Wait for it to take effect
+                self.page.get_by_role("button", name="Calculate shares").wait_for(timeout=2000)
+
+
             # When enabling extended hour trading
             extended = False
             precision = 3
@@ -190,7 +191,6 @@ class FidelityAutomation:
             # Press the buy or sell button. Title capitalizes the first letter so 'buy' -> 'Buy'
             self.page.locator("#order-action-input-container").click()
             self.page.get_by_role("option", name=action.lower().title()).wait_for()
-            time.sleep(0.3)
             self.page.get_by_role("option", name=action.lower().title()).click()
             
 
@@ -211,7 +211,7 @@ class FidelityAutomation:
                 
                 # Click on the limit default option when in extended hours
                 self.page.locator("#order-type-container-id").click()
-                self.page.get_by_role("option", name="Limit").click()
+                self.page.get_by_role("option", name="Limit", exact=True).click()
                 # Enter the limit price
                 self.page.get_by_text("Limit price").click()
                 self.page.get_by_label("Limit price").fill(str(wanted_price))
@@ -219,12 +219,7 @@ class FidelityAutomation:
             else:
                 # Click on the market
                 self.page.locator("#order-type-container-id").click()
-                self.page.get_by_role("option", name="Market").click()
-
-            # # Ensure its a day trade (default option when extended hours trading)
-            # if not self.page.get_by_role("button", name="Time in force Day").is_visible():
-            #     self.page.locator("dropdownlist-ett-ap122489").filter(has_text="Time in force").click()
-            #     self.page.get_by_role("option", name="Day").click()
+                self.page.get_by_role("option", name="Market", exact=True).click()
 
             # Continue with the order
             self.page.get_by_role("button", name="Preview order").click()
@@ -370,9 +365,10 @@ try:
     for acc in accounts:
         acc = acc.split(':')
         fid.fidelitylogin(acc[0], acc[1], acc[2])
-    
+    info = fid.getAccountInfo()
     for stock in ('rsls', 'otrk'):
-        for key in fid.getAccountInfo():    
+        fid.page.reload()
+        for key in info:    
             success, msg = fid.fidelitytransaction(stock, 1.0, 'buy', key, 'True')
             if not success:
                 print(msg)
