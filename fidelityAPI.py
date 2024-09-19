@@ -5,6 +5,7 @@ import random
 from datetime import datetime
 from time import sleep
 from dotenv import load_dotenv
+import pyotp
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import StealthConfig, stealth_sync  
@@ -33,7 +34,7 @@ class FidelityAutomation:
         # Apply stealth settings
         stealth_sync(self.page, self.stealth_config)
 
-    def fidelitylogin(self, username: str, password: str) -> bool:
+    def fidelitylogin(self, username: str, password: str, totp_secret=None) -> bool:
         try:
             # Go to the login page
             self.page.goto("https://digital.fidelity.com/prgw/digital/login/full-page")
@@ -52,10 +53,31 @@ class FidelityAutomation:
             except PlaywrightTimeoutError:
                 # Didn't get there yet, continue trying
                 pass
+            
+            # Check to see if blank
+            totp_secret=(None if totp_secret == "NA" else totp_secret)
 
             # If we hit the 2fA page after trying to login
             if 'login' in self.page.url:
                 
+                # If TOTP secret is provided, we are will use the TOTP key. See if authenticator code is present
+                if totp_secret != None and self.page.get_by_role("heading", name="Enter the code from your").is_visible():
+                    # Get authenticator code 
+                    code = pyotp.TOTP(totp_secret).now()
+                    # Enter the code
+                    self.page.get_by_placeholder("XXXXXX").click()
+                    self.page.get_by_placeholder("XXXXXX").fill(code)
+
+                    # Prevent future OTP requirements
+                    self.page.locator("label").filter(has_text="Don't ask me again on this").check()
+                    assert self.page.locator("label").filter(has_text="Don't ask me again on this").is_checked()
+                    
+                    # Log in with code
+                    self.page.get_by_role("button", name="Continue").click()
+                # If the authenticator code is the only way but we don't have the secret, return error
+                elif self.page.get_by_text("Enter the code from your authenticator app This security code will confirm the").is_visible():
+                    raise Exception("Fidelity needs code from authenticator app but TOTP secret is not provided")
+                    
                 # If the app push notification page is present
                 if self.page.get_by_role("link", name="Try another way").is_visible():
                     self.page.locator("label").filter(has_text="Don't ask me again on this").check()
@@ -64,18 +86,20 @@ class FidelityAutomation:
                     # Click on alternate verification method to get OTP via text
                     self.page.get_by_role("link", name="Try another way").click()
                 
-                # Press the Text me button
-                self.page.get_by_role("button", name="Text me the code").click()
-                self.page.get_by_placeholder("XXXXXX").click()
+                    # Press the Text me button
+                    self.page.get_by_role("button", name="Text me the code").click()
+
+                    # Get the code
+                    code = input('Enter the code')
+
+                    # Enter the code
+                    self.page.get_by_placeholder("XXXXXX").click()
+                    self.page.get_by_placeholder("XXXXXX").fill(code)
                 
-                # TODO Revamp how to enter this code
-                code = input('Enter the code')
-                self.page.get_by_placeholder("XXXXXX").fill(code)
-                
-                # Prevent future OTP requirements
-                self.page.locator("label").filter(has_text="Don't ask me again on this").check()
-                assert self.page.locator("label").filter(has_text="Don't ask me again on this").is_checked()
-                self.page.get_by_role("button", name="Submit").click()
+                    # Prevent future OTP requirements
+                    self.page.locator("label").filter(has_text="Don't ask me again on this").check()
+                    assert self.page.locator("label").filter(has_text="Don't ask me again on this").is_checked()
+                    self.page.get_by_role("button", name="Submit").click()
 
                 self.page.wait_for_url('https://digital.fidelity.com/ftgw/digital/portfolio/summary', timeout=5000)
                 return True
@@ -276,13 +300,7 @@ try:
     accounts = (os.environ["FIDELITY"].strip().split(","))
     for acc in accounts:
         acc = acc.split(':')
-        fid.fidelitylogin(acc[0], acc[1])
-        # Individual 12 (Z32228331)
-    acnum = ('Z32228331', 'Z09449756')
-    for ac in acnum:
-        success, message = fid.fidelitytransaction('TRAW', 1, 'buy', ac, True)
-        if not success:
-            print(message)
+        fid.fidelitylogin(acc[0], acc[1], acc[2])
     # fid.getAccountInfo()
 except Exception as e:
     print(e)
