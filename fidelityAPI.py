@@ -128,6 +128,14 @@ class FidelityAutomation:
             
             # Click on the drop down
             self.page.query_selector("#dest-acct-dropdown").click()
+            
+            if not self.page.get_by_role("option").filter(has_text=account.upper()).is_visible():
+                # Reload the page and hit the drop down again
+                # This is to prevent a rare case where the drop down is empty
+                print("Reloading...")
+                self.page.reload()
+                # Click on the drop down
+                self.page.query_selector("#dest-acct-dropdown").click()
             # Find the account to trade under
             self.page.get_by_role("option").filter(has_text=account.upper()).click()
 
@@ -153,9 +161,15 @@ class FidelityAutomation:
             self.page.get_by_text("Share amount").click()
             self.page.get_by_label("Share amount").fill(str(quantity))
             # If it should be limit
-            if float(last_price) < 1 and action.lower() == 'buy':
-                difference_price = 0.01 if float(last_price) > 0.1 else 0.0001
-                wanted_price = round(float(last_price) + difference_price, 3)
+            if float(last_price) < 1:
+                # Buy above
+                if action.lower() == 'buy':
+                    difference_price = 0.01 if float(last_price) > 0.1 else 0.0001
+                    wanted_price = round(float(last_price) + difference_price, 3)
+                # Sell below
+                else:
+                    difference_price = 0.01 if float(last_price) > 0.1 else 0.0001
+                    wanted_price = round(float(last_price) - difference_price, 3)
                 # Click on the limit
                 self.page.locator("#market-no label").click()
                 # Enter the limit price
@@ -191,7 +205,7 @@ class FidelityAutomation:
                         if i == 0 or (character == ' ' and error_message[i - 1] == ' '):
                             continue
                         filtered_error += character
-                            
+                    error_message = filtered_error
                 return (False, error_message)
             
             # If no error occurred, continue with checking and buy/sell
