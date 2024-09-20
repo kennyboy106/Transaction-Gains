@@ -122,6 +122,9 @@ class FidelityAutomation:
     def fidelitytransaction(self, stock: str, quantity: float, action: str, account: str, dry: bool=True) -> bool:
         '''
         Process an order (transaction) using the dedicated trading page.
+        NOTE: If you use this function repeatedly but change the stock between any call, 
+        RELOAD the page before calling this
+        
         For buying:
             If the price of the security is below $1, it will choose limit order and go off of the last price + a little
         For selling:
@@ -137,8 +140,6 @@ class FidelityAutomation:
         Returns:
             (Success: bool, Error_message: str) If the order was successfully placed or tested (for dry runs) then True is
             returned and Error_message will be None. Otherwise, False will be returned and Error_message will not be None
-
-        
         '''
         try:
             # Go to the trade page
@@ -187,12 +188,10 @@ class FidelityAutomation:
                 extended = True
                 precision = 2
 
-            
             # Press the buy or sell button. Title capitalizes the first letter so 'buy' -> 'Buy'
             self.page.locator("#order-action-input-container").click()
-            self.page.get_by_role("option", name=action.lower().title()).wait_for()
-            self.page.get_by_role("option", name=action.lower().title()).click()
-            
+            self.page.get_by_role("option", name=action.lower().title(), exact=True).wait_for()
+            self.page.get_by_role("option", name=action.lower().title(), exact=True).click()
 
             # Press the shares text box
             self.page.locator("#eqt-mts-stock-quatity div").filter(has_text="Quantity").click()
@@ -240,10 +239,11 @@ class FidelityAutomation:
                 # Return with error and trim it down (it contains many spaces for some reason)
                 if error_message != None:
                     for i, character in enumerate(error_message):
-                        if i == 0 or (character == ' ' and error_message[i - 1] == ' '):
+                        if i == 0 or (character == ' ' and error_message[i - 1] == ' ') or character == '\n' or character == '\t':
                             continue
                         filtered_error += character
-                    error_message = filtered_error
+                    filtered_error = filtered_error.replace('critical', '').strip()
+                    error_message = filtered_error.replace('\n', '')
                 return (False, error_message)
             
             # If no error occurred, continue with checking and buy/sell
@@ -268,8 +268,8 @@ class FidelityAutomation:
                     return (False, 'Order failed to complete')
             # If its a dry run, report back success
             return (True, None)
-        # except PlaywrightTimeoutError:
-        #     return (False, 'Driver timed out. Order not complete')
+        except PlaywrightTimeoutError:
+            return (False, 'Driver timed out. Order not complete')
         except Exception as e:
             return (False, e)
 
