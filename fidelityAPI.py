@@ -18,6 +18,8 @@ class FidelityAutomation:
         load_dotenv()
         self.username = os.getenv('FIDELITY_USERNAME')
         self.password = os.getenv('FIDELTIY_PASSWORD')
+        # Used for memory in transaction function
+        self.last_traded_stock = None
         self.headless: bool = headless
         self.stealth_config = StealthConfig(
             navigator_languages=False,
@@ -141,11 +143,26 @@ class FidelityAutomation:
             (Success: bool, Error_message: str) If the order was successfully placed or tested (for dry runs) then True is
             returned and Error_message will be None. Otherwise, False will be returned and Error_message will not be None
         '''
+        # TODO Change as much stuff as possible to css selectors
         try:
             # Go to the trade page
             if self.page.url != 'https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry':
                 self.page.goto('https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry')
 
+            # elif self.last_traded_stock is not None:
+            #     if self.last_traded_stock == stock:
+            #         # Check the price, enter the price, completele the order
+            #         # Wait for quote panel to show up
+            #         self.page.locator("#quote-panel").wait_for(timeout=2000)
+            #         last_price = self.page.query_selector("#eq-ticket__last-price > span.last-price").text_content()
+            #         last_price = last_price.replace('$','')
+            #         # If its an extened order, i need special rounding
+            #         # If its a market order, dont need to enter
+            #         # How do i make sure that the order page has all the right things populated from last time?
+            #             # Maybe just check to see if the boxes are checked with what i want
+
+            else:
+                self.last_traded_stock = stock
             # Click on the drop down
             self.page.query_selector("#dest-acct-dropdown").click()
             
@@ -189,13 +206,13 @@ class FidelityAutomation:
                 precision = 2
 
             # Press the buy or sell button. Title capitalizes the first letter so 'buy' -> 'Buy'
-            self.page.locator("#order-action-input-container").click()
+            self.page.query_selector(".eq-ticket-action-label").click()
             self.page.get_by_role("option", name=action.lower().title(), exact=True).wait_for()
             self.page.get_by_role("option", name=action.lower().title(), exact=True).click()
 
             # Press the shares text box
             self.page.locator("#eqt-mts-stock-quatity div").filter(has_text="Quantity").click()
-            self.page.get_by_label("you own").fill(str(quantity))
+            self.page.get_by_text("Quantity", exact=True).fill(str(quantity))
 
             # If it should be limit
             if float(last_price) < 1 or extended:
@@ -209,7 +226,7 @@ class FidelityAutomation:
                     wanted_price = round(float(last_price) - difference_price, precision)
                 
                 # Click on the limit default option when in extended hours
-                self.page.locator("#order-type-container-id").click()
+                self.page.query_selector("#dest-dropdownlist-button-ordertype > span:nth-child(1)").click()
                 self.page.get_by_role("option", name="Limit", exact=True).click()
                 # Enter the limit price
                 self.page.get_by_text("Limit price").click()
@@ -226,7 +243,7 @@ class FidelityAutomation:
             # If error occurred
             try:
                 self.page.get_by_role("button", name="Place order clicking this").wait_for(timeout=4000, state='visible')
-            except PlaywrightTimeoutError:
+            except PlaywrightTimeoutError as e:
                 # Error must be present (or really slow page for some reason)
                 # Try to report on error
                 error_message = 'Could not retrieve error message from popup'
@@ -244,7 +261,7 @@ class FidelityAutomation:
                         filtered_error += character
                     filtered_error = filtered_error.replace('critical', '').strip()
                     error_message = filtered_error.replace('\n', '')
-                return (False, error_message)
+                return (False, error_message + str(e))
             
             # If no error occurred, continue with checking and buy/sell
             try:
@@ -263,17 +280,16 @@ class FidelityAutomation:
                     self.page.get_by_text("Order received").wait_for(timeout=5000, state='visible')
                     # If no error, return with success
                     return (True, None)
-                except PlaywrightTimeoutError:
+                except PlaywrightTimeoutError as e:
                     # Order didn't go through for some reason, go to the next and say error
-                    return (False, 'Order failed to complete')
+                    return (False, f'Order failed to complete: {str(e)}')
             # If its a dry run, report back success
             return (True, None)
-        except PlaywrightTimeoutError:
-            return (False, 'Driver timed out. Order not complete')
+        except PlaywrightTimeoutError as e:
+            return (False, f'Driver timed out. Order not complete: {str(e)}')
         except Exception as e:
             return (False, e)
 
-    
     def getAccountInfo(self):
         '''
         Gets account numbers, account names, and account totals by downloading the csv of positions from fidelity.
@@ -355,9 +371,6 @@ class FidelityAutomation:
         return self.account_dict
 
 
-
-
-
 # Create fidelity driver class
 fid = FidelityAutomation(False)
 try:
@@ -366,14 +379,21 @@ try:
         acc = acc.split(':')
         fid.fidelitylogin(acc[0], acc[1], acc[2])
     info = fid.getAccountInfo()
+    for stock in ('allr',):
+        fid.page.reload()
+        for key in info:    
+            success, msg = fid.fidelitytransaction(stock, 1.0, 'buy', key, True)
+            if not success:
+                print(msg)
+                # raise Exception("Go look, we failed")
+    # print(fid.fidelitytransaction('rsls', 1.0, 'buy', 'Z09449756', 'True'))
     for stock in ('rsls', 'otrk'):
         fid.page.reload()
         for key in info:    
-            success, msg = fid.fidelitytransaction(stock, 1.0, 'buy', key, 'True')
+            success, msg = fid.fidelitytransaction(stock, 1.0, 'sell', key, True)
             if not success:
                 print(msg)
-                raise Exception("Go look, we failed")
-    # print(fid.fidelitytransaction('rsls', 1.0, 'buy', 'Z09449756', 'True'))
+                # raise Exception("Go look, we failed")
 except Exception as e:
 
     print(e)
