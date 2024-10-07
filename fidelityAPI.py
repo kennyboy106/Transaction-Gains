@@ -678,7 +678,7 @@ class FidelityAutomation:
 
         return self.account_dict
 
-    def open_account(self, type: typing.Optional[Literal["roth", "brokerage"]] = None):
+    def open_account(self, type: typing.Optional[Literal["roth", "brokerage"]] = None) -> bool:
         """
         Parameters:
             type: str: The type of account to open.
@@ -688,12 +688,69 @@ class FidelityAutomation:
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation")
         if type == "brokerage":
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/JointSelectionPage")
-            self.page.get_by_role("button", name="Next").click()
-            self.page.get_by_role("button", name="Next").click()
 
+            loading_icon = self.page.locator("pvd-loading-spinner").first
+            loading_icon.wait_for(timeout=60000, state="hidden")
+            # First section
+            if self.page.get_by_role("heading", name="Account ownership").is_visible():
+                self.page.get_by_role("button", name="Next").click()
+                loading_icon.wait_for(timeout=60000, state="hidden")
+            # If application is already started, then there will only be 1 "Next" button
+            if self.page.get_by_role("heading", name="Where your cash will be held").is_visible():
+                self.page.get_by_role("button", name="Next").click()
+                loading_icon.wait_for(timeout=60000, state="hidden")
+            # Open the account
+            if self.page.url == "https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/ReviewAndConfirm":
+                self.page.get_by_role("button", name="Open account").click()
+                loading_icon.wait_for(timeout=60000, state="hidden")
+                
+                # Wait for account to open and page to load
+                self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/bank-setup/funding", timeout=5000)
+
+                # Return to summary page
+                self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
+                # All done
+                return True
+            else:
+                return False
+            # Funding the account should be done in its own step. How can I return the account number of the new account created?
+
+            
+    def get_new_account_number(self):
+        # One idea for this is to move every account out of the INVESTMENT category or Retirement category.
+        # Doing this would leave only 1 account in there and i can easily get the account number from there. 
+
+        # The best way is to just select the account transfer right after the opening of the account.
+        # The new account number is autopopulted in the second box
+        self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
+        self.page.get_by_text
 
         # Open account button
         # get_by_role("button", name="Open account")
+        pass
+
+    def enable_pennystock_trading(self):
+        # Maybe need to go through the normal way of getting to this page and not via url
+        self.page.goto(url="https://digital.fidelity.com/ftgw/digital/easy/pst/education")
+        loading_icon = self.page.locator(".pvd-spinner__mask-inner").first
+        loading_icon.wait_for(timeout=60000, state="hidden")
+        self.page.get_by_role("button", name="Start").click()
+        loading_icon.wait_for(timeout=60000, state="hidden")
+
+        # There are 2 versions of this. A checkbox and a drop down
+
+        # Checkbox version
+        # Need the acount number to enable
+        self.page.locator("label").filter(has_text="Individual 9 (Z34156613)").click()
+        self.page.get_by_role("button", name="Continue").click()
+
+        self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/easy/hrt/pst/termsandconditions")
+        loading_icon.wait_for(timeout=60000, state="hidden")
+        self.page.query_selector(".pvd-checkbox__label").click()
+        self.page.get_by_role("button", name="Submit").click()
+        loading_icon.wait_for(timeout=60000, state="hidden")
+        success_ribbon = self.page.get_by_role("heading", name="Success!")
+        success_ribbon.wait_for(state="visible", timeout=30000)
         pass
     
     def download_prev_statement(self, date: str):
@@ -754,8 +811,9 @@ try:
             save_device=False,
         )
         print("Logged in")
-        browser.open_account("brokerage")
-
+        # if browser.open_account("brokerage"):
+        #     print("Success")
+        browser.enable_pennystock_trading()
 except Exception as e:
     print(e)
 browser.page.pause()
