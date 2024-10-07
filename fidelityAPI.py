@@ -6,6 +6,8 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 import pyotp
+import typing
+from typing import Literal
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import StealthConfig, stealth_sync  
@@ -676,13 +678,19 @@ class FidelityAutomation:
 
         return self.account_dict
 
-    def open_account(self):
-        self.page.goto(url="https://www.fidelity.com/open-account/overview")
-        # This is the individual brokage page
-        # https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/JointSelectionPage
+    def open_account(self, type: typing.Optional[Literal["roth", "brokerage"]] = None):
+        """
+        Parameters:
+            type: str: The type of account to open.
+        """
 
-        # This is the roth ira page
-        # https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation
+        if type == "roth":
+            self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation")
+        if type == "brokerage":
+            self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/JointSelectionPage")
+            self.page.get_by_role("button", name="Next").click()
+            self.page.get_by_role("button", name="Next").click()
+
 
         # Open account button
         # get_by_role("button", name="Open account")
@@ -745,10 +753,8 @@ try:
             totp_secret=account[2] if len(account) > 2 else None,
             save_device=False,
         )
-
-        # info = browser.getAccountInfo()
         print("Logged in")
-        browser.download_prev_statement(date="06/2024")
+        browser.open_account("brokerage")
 
 except Exception as e:
     print(e)
