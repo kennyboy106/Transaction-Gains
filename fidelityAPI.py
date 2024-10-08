@@ -683,34 +683,39 @@ class FidelityAutomation:
             type: typing.Optional[Literal["roth", "brokerage"]] = None,
             transfer: float = None,
             source_account: str = None,
-        ) -> (bool, str):
+        ):
         """
         Parameters:
             type: str: The type of account to open.
         """
-
+        # TEST FLAG TO ENSURE NO ACCIDENTAL OPENING
+        self.page.pause()
         if type == "roth":
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation")
         if type == "brokerage":
+            # Go to individual brokerage page
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/JointSelectionPage")
-
             loading_icon = self.page.locator("pvd-loading-spinner").first
             loading_icon.wait_for(timeout=60000, state="hidden")
+
             # First section
             if self.page.get_by_role("heading", name="Account ownership").is_visible():
                 self.page.get_by_role("button", name="Next").click()
                 loading_icon.wait_for(timeout=60000, state="hidden")
+
             # If application is already started, then there will only be 1 "Next" button
             if self.page.get_by_role("heading", name="Where your cash will be held").is_visible():
                 self.page.get_by_role("button", name="Next").click()
                 loading_icon.wait_for(timeout=60000, state="hidden")
+
             # Open the account
             if self.page.url == "https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/ReviewAndConfirm":
                 self.page.get_by_role("button", name="Open account").click()
                 loading_icon.wait_for(timeout=60000, state="hidden")
                 
+                # TODO need another wait here for a different loading symbol used
                 # Wait for account to open and page to load
-                self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/bank-setup/funding", timeout=5000)
+                self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/bank-setup/funding", timeout=60000)
             
             # If want to transfer
             if (transfer is not None
@@ -766,29 +771,55 @@ class FidelityAutomation:
         # get_by_role("button", name="Open account")
         pass
 
-    def enable_pennystock_trading(self):
+    def enable_pennystock_trading(self, account: str):
+        """
+        Enables penny stock trading for the account given.
+        The account is just the account number, no nickname
+        
+        TODO make account parameter into a list so i can just iterate through all available accounts 
+        (this might not work becuase new accounts dont have positions and dont show up in the account info function)
+        
+        """
+        self.page.pause()
         # Maybe need to go through the normal way of getting to this page and not via url
-        self.page.goto(url="https://digital.fidelity.com/ftgw/digital/easy/pst/education")
-        loading_icon = self.page.locator(".pvd-spinner__mask-inner").first
-        loading_icon.wait_for(timeout=60000, state="hidden")
-        self.page.get_by_role("button", name="Start").click()
-        loading_icon.wait_for(timeout=60000, state="hidden")
+        self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/features")
+        self.page.get_by_label("Manage Penny Stock Trading").click()
+
+        # loading_icon = self.page.locator(".pvd-spinner__mask-inner").first
+        # loading_icon.wait_for(timeout=60000, state="hidden")
+        self.page.wait_for_load_state(state="load", timeout=30000)
+        self.wait_for_loading_sign()
+        if self.page.get_by_role("button", name="Start").is_visible():
+            self.page.get_by_role("button", name="Start").click()
+        # loading_icon.wait_for(timeout=60000, state="hidden")
+        self.wait_for_loading_sign()
+
+        # Ensure the page is loaded
+        select_account_title = self.page.get_by_role("heading", name="Select an account")
+        select_account_title.wait_for(timeout=30000, state="visible")
 
         # There are 2 versions of this. A checkbox and a drop down
 
         # Checkbox version
-        # Need the acount number to enable
-        self.page.locator("label").filter(has_text="Individual 9 (Z34156613)").click()
+        if self.page.locator("label").filter(has_text=account).is_visible():
+            self.page.locator("label").filter(has_text=account).click()
+
+        if self.page.get_by_label("Your eligible accounts").is_visible():
+            self.page.get_by_label("Your eligible accounts").select_option(account)
+            # self.page.get_by_role("option").filter(has_text=account.upper()).click()
+        
+        # Continue with enabling
         self.page.get_by_role("button", name="Continue").click()
 
         self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/easy/hrt/pst/termsandconditions")
-        loading_icon.wait_for(timeout=60000, state="hidden")
+        # loading_icon.wait_for(timeout=60000, state="hidden")
+        self.wait_for_loading_sign()
         self.page.query_selector(".pvd-checkbox__label").click()
         self.page.get_by_role("button", name="Submit").click()
-        loading_icon.wait_for(timeout=60000, state="hidden")
+        # loading_icon.wait_for(timeout=60000, state="hidden")
+        self.wait_for_loading_sign()
         success_ribbon = self.page.get_by_role("heading", name="Success!")
         success_ribbon.wait_for(state="visible", timeout=30000)
-        pass
     
     def download_prev_statement(self, date: str):
         """
@@ -824,6 +855,14 @@ class FidelityAutomation:
         page1.close()
         return statement
 
+    def wait_for_loading_sign(self, timeout: int = 30000):
+        # Wait for all kinds of loading signs
+        signs = [self.page.locator("div:nth-child(2) > .loading-spinner-mask-after"),
+                 self.page.locator(".pvd-spinner__mask-inner").first,
+                 self.page.locator("pvd-loading-spinner").first,
+                ]
+        for sign in signs:
+            sign.wait_for(timeout=timeout, state="hidden") 
 
 # --------------------------------------- TEST AREA --------------------------------------- #
 # Create fidelity driver class
@@ -848,9 +887,10 @@ try:
             save_device=False,
         )
         print("Logged in")
-        # if browser.open_account("brokerage"):
+        # success, account_num = browser.open_account("brokerage")
+        # if success:
         #     print("Success")
-        # browser.enable_pennystock_trading()
+        browser.enable_pennystock_trading("Z30592866")
 except Exception as e:
     print(e)
 
