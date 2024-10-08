@@ -678,7 +678,12 @@ class FidelityAutomation:
 
         return self.account_dict
 
-    def open_account(self, type: typing.Optional[Literal["roth", "brokerage"]] = None) -> bool:
+    def open_account(
+            self,
+            type: typing.Optional[Literal["roth", "brokerage"]] = None,
+            transfer: float = None,
+            source_account: str = None,
+        ) -> (bool, str):
         """
         Parameters:
             type: str: The type of account to open.
@@ -706,15 +711,48 @@ class FidelityAutomation:
                 
                 # Wait for account to open and page to load
                 self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/bank-setup/funding", timeout=5000)
+            
+            # If want to transfer
+            if (transfer is not None
+                and float(transfer) > 0
+                and source_account is not None
+            ):
+                # Use source account
+                self.page.query_selector("#From-acct-select").click()
+                self.page.get_by_role("option").filter(has_text=source_account.upper()).click()
 
-                # Return to summary page
-                self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
-                # All done
-                return True
-            else:
-                return False
+                # Ensure account has the money to transfer
+                available = self.page.query_selector("tr.pvd-table__row:nth-child(2) > td:nth-child(2)").text_content()
+                available = float(available.replace("$", ""))
+                if transfer < available:
+                    return (False, None)
+                
+                # Wait for the info to load
+                loading_icon = self.page.locator(".pvd-spinner__mask-inner").first
+                loading_icon.wait_for(timeout=30000, state="hidden")
+
+                # Get the new account number while we are here
+                new_account = self.page.query_selector("#To-acct-select").text_content()
+
+                # Enter the amount to transfer
+                self.page.get_by_label("Transfer amount").click()
+                self.page.get_by_label("Transfer amount").fill(str(transfer))
+
+                # Submit the transfer
+                self.page.get_by_role("button", name="Continue").click()
+                loading_icon.wait_for(timeout=30000, state="hidden")
+                self.page.get_by_role("button", name="Submit").click()
+                loading_icon.wait_for(timeout=30000, state="hidden")
+                if self.page.get_by_role("heading", name="You've submitted the transfer").is_visible():
+                    # Return to summary page
+                    self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
+                    return (True, new_account)
+
+            # Return to summary page
+            self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
+            # All done
+            return (True, None)
             # Funding the account should be done in its own step. How can I return the account number of the new account created?
-
             
     def get_new_account_number(self):
         # One idea for this is to move every account out of the INVESTMENT category or Retirement category.
@@ -723,7 +761,6 @@ class FidelityAutomation:
         # The best way is to just select the account transfer right after the opening of the account.
         # The new account number is autopopulted in the second box
         self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
-        self.page.get_by_text
 
         # Open account button
         # get_by_role("button", name="Open account")
@@ -813,7 +850,41 @@ try:
         print("Logged in")
         # if browser.open_account("brokerage"):
         #     print("Success")
-        browser.enable_pennystock_trading()
+        # browser.enable_pennystock_trading()
 except Exception as e:
     print(e)
-browser.page.pause()
+
+exit_con = 1
+while exit_con:
+
+    browser.page.pause()
+    choice = input("""
+                   0: Quit\n
+                   1: locator string\n
+                   2: CSS selector string\n
+                   3: Get by text\n
+                   4: Get by role\n
+                   5: Get by label\n
+                   6: Goto url\n
+                   7: Get text of CSS selector\n
+                   """)
+    choice = int(choice)
+    if choice > 0:
+        str_in = input("Enter the str to click")
+        if choice == 1:
+            browser.page.locator(str_in).click()
+        if choice == 2:
+            browser.page.query_selector(str_in).click()
+        if choice == 3:
+            browser.page.get_by_text(str_in).click()
+        if choice == 4:
+            browser.page.get_by_role(str_in).click()
+        if choice == 5:
+            browser.page.get_by_label(str_in).click()
+        if choice == 6:
+            browser.page.goto(str_in)
+        if choice == 7:
+            print(browser.page.query_selector(str_in).text_content())
+    else:
+        exit_con = 0
+        
