@@ -725,59 +725,64 @@ class FidelityAutomation:
         if type == "brokerage":
             # Go to individual brokerage page
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/JointSelectionPage")
-            loading_icon = self.page.locator("pvd-loading-spinner").first
-            loading_icon.wait_for(timeout=60000, state="hidden")
+            self.wait_for_loading_sign()
 
             # First section
             if self.page.get_by_role("heading", name="Account ownership").is_visible():
                 self.page.get_by_role("button", name="Next").click()
-                loading_icon.wait_for(timeout=60000, state="hidden")
+                self.wait_for_loading_sign()
 
             # If application is already started, then there will only be 1 "Next" button
             if self.page.get_by_role("heading", name="Where your cash will be held").is_visible():
                 self.page.get_by_role("button", name="Next").click()
-                loading_icon.wait_for(timeout=60000, state="hidden")
+                self.wait_for_loading_sign()
 
             # Open the account
-            if self.page.url == "https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/ReviewAndConfirm":
-                self.page.get_by_role("button", name="Open account").click()
-                loading_icon.wait_for(timeout=60000, state="hidden")
+            self.page.get_by_role("button", name="Open account").click()
+            self.wait_for_loading_sign(timeout=60000)
                 
-                # TODO need another wait here for a different loading symbol used
-                # Wait for account to open and page to load
-                self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/bank-setup/funding", timeout=60000)
-            
-            # If want to transfer
-            if (transfer is not None
-                and float(transfer) > 0
-                and source_account is not None
-            ):
+            # TODO need another wait here for a different loading symbol used
+            # Wait for account to open and page to load
+            self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/bank-setup/funding", timeout=60000)
+            self.wait_for_loading_sign()
+
+            new_account = None
+            # Get the new account number
+            if source_account is not None:
+                self.page.get_by_text("Checkmark Icon Other options").click()
+                self.wait_for_loading_sign()
+                self.page.get_by_text("Transfer from another").click()
+                self.page.get_by_role("button", name="Continue").click()
+                self.page.wait_for_load_state(state="load")
+                self.wait_for_loading_sign()
+
                 # Use source account
                 self.page.query_selector("#From-acct-select").click()
                 self.page.get_by_role("option").filter(has_text=source_account.upper()).click()
+                self.wait_for_loading_sign()
 
                 # Ensure account has the money to transfer
                 available = self.page.query_selector("tr.pvd-table__row:nth-child(2) > td:nth-child(2)").text_content()
                 available = float(available.replace("$", ""))
-                if transfer < available:
-                    return (False, None)
-                
-                # Wait for the info to load
-                loading_icon = self.page.locator(".pvd-spinner__mask-inner").first
-                loading_icon.wait_for(timeout=30000, state="hidden")
 
                 # Get the new account number while we are here
                 new_account = self.page.query_selector("#To-acct-select").text_content()
-
+            
+            # Actually transfer some money
+            if (transfer is not None
+                and float(transfer > 0)
+            ):
                 # Enter the amount to transfer
                 self.page.get_by_label("Transfer amount").click()
                 self.page.get_by_label("Transfer amount").fill(str(transfer))
+                if transfer < available:
+                    raise Exception("New account opened but source account has insufficient funds")
 
                 # Submit the transfer
                 self.page.get_by_role("button", name="Continue").click()
-                loading_icon.wait_for(timeout=30000, state="hidden")
+                self.wait_for_loading_sign()
                 self.page.get_by_role("button", name="Submit").click()
-                loading_icon.wait_for(timeout=30000, state="hidden")
+                self.wait_for_loading_sign()
                 if self.page.get_by_role("heading", name="You've submitted the transfer").is_visible():
                     # Return to summary page
                     self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
@@ -786,7 +791,7 @@ class FidelityAutomation:
             # Return to summary page
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
             # All done
-            return (True, None)
+            return (True, new_account)
             # Funding the account should be done in its own step. How can I return the account number of the new account created?
             
     def get_new_account_number(self):
@@ -801,7 +806,7 @@ class FidelityAutomation:
         # get_by_role("button", name="Open account")
         pass
 
-    def enable_pennystock_trading(self, account: str):
+    def enable_pennystock_trading(self, account: str) -> bool:
         """
         Enables penny stock trading for the account given.
         The account is just the account number, no nickname
@@ -853,6 +858,7 @@ class FidelityAutomation:
         # Verify success
         success_ribbon = self.page.get_by_role("heading", name="Success!")
         success_ribbon.wait_for(state="visible", timeout=30000)
+        return True
     
     def download_prev_statement(self, date: str):
         """
@@ -920,10 +926,12 @@ try:
             save_device=False,
         )
         print("Logged in")
-        # success, account_num = browser.open_account("brokerage")
+        # success, account_num = browser.open_account("brokerage", source_account="Z24936689")
         # if success:
         #     print("Success")
-        browser.enable_pennystock_trading("246630058")
+        # if account_num:
+        #     print(account_num)
+        browser.enable_pennystock_trading("Z27902404")
 except Exception as e:
     print(e)
 
