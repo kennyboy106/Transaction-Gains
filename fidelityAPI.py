@@ -692,6 +692,36 @@ class FidelityAutomation:
         self.page.pause()
         if type == "roth":
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation")
+            self.wait_for_loading_sign()
+            self.page.get_by_role("button", name="Open account").click()
+            self.wait_for_loading_sign()
+            congrats_message = self.page.get_by_role("heading", name="Congratulations, your account")
+            congrats_message.wait_for(state="visible")
+
+            # Get the account number among other things
+            account = self.page.get_by_role("heading", name="Your account number is").text_content()
+            account = account.replace("Your account number is ", "")
+            
+            # If transfering do that
+            if (transfer is not None
+                and float(transfer) > 0
+                and source_account is not None
+            ):
+                self.page.get_by_role("button", name="Next").click()
+                self.wait_for_loading_sign()
+                self.page.get_by_text("Other funding options").click()
+                self.page.locator("label").filter(has_text="Transfer between Fidelity").click()
+                self.page.get_by_role("button", name="Continue").click()
+                # Double loading sign
+                self.wait_for_loading_sign()
+                self.page.wait_for_load_state(state="load")
+                self.wait_for_loading_sign()
+                # Use source account
+                self.page.query_selector("#From-acct-select").click()
+                self.page.get_by_role("option").filter(has_text=source_account.upper()).click()
+
+            return (True, account)
+
         if type == "brokerage":
             # Go to individual brokerage page
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/JointSelectionPage")
@@ -785,13 +815,10 @@ class FidelityAutomation:
         self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/features")
         self.page.get_by_label("Manage Penny Stock Trading").click()
 
-        # loading_icon = self.page.locator(".pvd-spinner__mask-inner").first
-        # loading_icon.wait_for(timeout=60000, state="hidden")
         self.page.wait_for_load_state(state="load", timeout=30000)
         self.wait_for_loading_sign()
         if self.page.get_by_role("button", name="Start").is_visible():
             self.page.get_by_role("button", name="Start").click()
-        # loading_icon.wait_for(timeout=60000, state="hidden")
         self.wait_for_loading_sign()
 
         # Ensure the page is loaded
@@ -801,23 +828,29 @@ class FidelityAutomation:
         # There are 2 versions of this. A checkbox and a drop down
 
         # Checkbox version
+        # This one seems to have trouble with infinite loading sign
         if self.page.locator("label").filter(has_text=account).is_visible():
             self.page.locator("label").filter(has_text=account).click()
 
+        # Dropdown version
         if self.page.get_by_label("Your eligible accounts").is_visible():
             self.page.get_by_label("Your eligible accounts").select_option(account)
-            # self.page.get_by_role("option").filter(has_text=account.upper()).click()
         
         # Continue with enabling
         self.page.get_by_role("button", name="Continue").click()
-
+        try:
+            self.wait_for_loading_sign(timeout=60000)
+        except PlaywrightTimeoutError:
+            # Reload
+            self.enable_pennystock_trading(account=account)
+            return
         self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/easy/hrt/pst/termsandconditions")
-        # loading_icon.wait_for(timeout=60000, state="hidden")
         self.wait_for_loading_sign()
+        # Accept the risks
         self.page.query_selector(".pvd-checkbox__label").click()
         self.page.get_by_role("button", name="Submit").click()
-        # loading_icon.wait_for(timeout=60000, state="hidden")
         self.wait_for_loading_sign()
+        # Verify success
         success_ribbon = self.page.get_by_role("heading", name="Success!")
         success_ribbon.wait_for(state="visible", timeout=30000)
     
@@ -857,7 +890,7 @@ class FidelityAutomation:
 
     def wait_for_loading_sign(self, timeout: int = 30000):
         # Wait for all kinds of loading signs
-        signs = [self.page.locator("div:nth-child(2) > .loading-spinner-mask-after"),
+        signs = [self.page.locator("div:nth-child(2) > .loading-spinner-mask-after").first,
                  self.page.locator(".pvd-spinner__mask-inner").first,
                  self.page.locator("pvd-loading-spinner").first,
                 ]
@@ -890,7 +923,7 @@ try:
         # success, account_num = browser.open_account("brokerage")
         # if success:
         #     print("Success")
-        browser.enable_pennystock_trading("Z30592866")
+        browser.enable_pennystock_trading("246630058")
 except Exception as e:
     print(e)
 
@@ -909,22 +942,25 @@ while exit_con:
                    7: Get text of CSS selector\n
                    """)
     choice = int(choice)
-    if choice > 0:
-        str_in = input("Enter the str to click")
-        if choice == 1:
-            browser.page.locator(str_in).click()
-        if choice == 2:
-            browser.page.query_selector(str_in).click()
-        if choice == 3:
-            browser.page.get_by_text(str_in).click()
-        if choice == 4:
-            browser.page.get_by_role(str_in).click()
-        if choice == 5:
-            browser.page.get_by_label(str_in).click()
-        if choice == 6:
-            browser.page.goto(str_in)
-        if choice == 7:
-            print(browser.page.query_selector(str_in).text_content())
-    else:
-        exit_con = 0
+    try:
+        if choice > 0:
+            str_in = input("Enter the str to click")
+            if choice == 1:
+                browser.page.locator(str_in).click()
+            if choice == 2:
+                browser.page.query_selector(str_in).click()
+            if choice == 3:
+                browser.page.get_by_text(str_in).click()
+            if choice == 4:
+                browser.page.get_by_role(str_in).click()
+            if choice == 5:
+                browser.page.get_by_label(str_in).click()
+            if choice == 6:
+                browser.page.goto(str_in)
+            if choice == 7:
+                print(browser.page.query_selector(str_in).text_content())
+        else:
+            exit_con = 0
+    except:
+        pass
         
