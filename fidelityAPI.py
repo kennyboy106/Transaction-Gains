@@ -138,8 +138,7 @@ class FidelityAutomation:
             self.page.get_by_label("Password", exact=True).fill(password)
             self.page.get_by_role("button", name="Log in").click()
             # Wait for loading spinner to go away
-            loading_icon = self.page.locator(".pvd-spinner__mask-inner").first
-            loading_icon.wait_for(timeout=5000, state="hidden")
+            self.wait_for_loading_sign()
 
             # See if the summary page has been reached
             self.page.wait_for_load_state(timeout=60000, state="load")
@@ -151,6 +150,7 @@ class FidelityAutomation:
 
             # If we hit the 2fA page after trying to login
             if "login" in self.page.url:
+                self.wait_for_loading_sign()
                 widget = self.page.locator("#dom-widget div").first
                 widget.wait_for(timeout=5000, state='visible')
                 # If TOTP secret is provided, we are will use the TOTP key. See if authenticator code is present
@@ -172,8 +172,7 @@ class FidelityAutomation:
                     self.page.get_by_role("button", name="Continue").click()
 
                     # Wait for loading spinner to go away
-                    loading_icon = self.page.locator(".pvd-spinner__mask-inner").first
-                    loading_icon.wait_for(timeout=5000, state="hidden")
+                    self.wait_for_loading_sign()
 
                     # See if we got to the summary page
                     self.page.wait_for_url(
@@ -689,7 +688,9 @@ class FidelityAutomation:
             type: str: The type of account to open.
         """
         # TEST FLAG TO ENSURE NO ACCIDENTAL OPENING
+        print("OPENING ACCOUNT, PLEASE CONTINUE")
         self.page.pause()
+
         if type == "roth":
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation")
             self.wait_for_loading_sign()
@@ -702,6 +703,8 @@ class FidelityAutomation:
             account = self.page.get_by_role("heading", name="Your account number is").text_content()
             account = account.replace("Your account number is ", "")
             
+            # Work in progress. See below commented block for more details
+            """
             # If transfering do that
             if (transfer is not None
                 and float(transfer) > 0
@@ -719,7 +722,7 @@ class FidelityAutomation:
                 # Use source account
                 self.page.query_selector("#From-acct-select").click()
                 self.page.get_by_role("option").filter(has_text=source_account.upper()).click()
-
+            """
             return (True, account)
 
         if type == "brokerage":
@@ -745,7 +748,7 @@ class FidelityAutomation:
             # Wait for account to open and page to load
             self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/bank-setup/funding", timeout=60000)
             self.wait_for_loading_sign()
-
+            """
             new_account = None
             # Get the new account number
             if source_account is not None:
@@ -757,6 +760,8 @@ class FidelityAutomation:
                 self.wait_for_loading_sign()
 
                 # Use source account
+                # This does not seem to work. 
+                # The dropdown uses some sequence of numbers for which account is in the list
                 self.page.query_selector("#From-acct-select").click()
                 self.page.get_by_role("option").filter(has_text=source_account.upper()).click()
                 self.wait_for_loading_sign()
@@ -787,11 +792,11 @@ class FidelityAutomation:
                     # Return to summary page
                     self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
                     return (True, new_account)
-
+            """
             # Return to summary page
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
             # All done
-            return (True, new_account)
+            return (True, None)
             # Funding the account should be done in its own step. How can I return the account number of the new account created?
             
     def get_new_account_number(self):
@@ -815,7 +820,6 @@ class FidelityAutomation:
         (this might not work becuase new accounts dont have positions and dont show up in the account info function)
         
         """
-        self.page.pause()
         # Maybe need to go through the normal way of getting to this page and not via url
         self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/features")
         self.page.get_by_label("Manage Penny Stock Trading").click()
@@ -835,6 +839,8 @@ class FidelityAutomation:
         # Checkbox version
         # This one seems to have trouble with infinite loading sign
         if self.page.locator("label").filter(has_text=account).is_visible():
+            # This seems to never work for checkbox version so reload and try for dropdown version
+            # return self.enable_pennystock_trading(account=account)
             self.page.locator("label").filter(has_text=account).click()
 
         # Dropdown version
@@ -847,8 +853,8 @@ class FidelityAutomation:
             self.wait_for_loading_sign(timeout=60000)
         except PlaywrightTimeoutError:
             # Reload
-            self.enable_pennystock_trading(account=account)
-            return
+            return self.enable_pennystock_trading(account=account)
+
         self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/easy/hrt/pst/termsandconditions")
         self.wait_for_loading_sign()
         # Accept the risks
@@ -903,6 +909,24 @@ class FidelityAutomation:
         for sign in signs:
             sign.wait_for(timeout=timeout, state="hidden") 
 
+    def transfer_acc_to_acc(self, source_account: str, destination_account: str):
+        """
+        WORK IN PROGRESS. NOT FULLY IMPLEMENTED
+        """
+        # Go to the transfer between accounts page
+        self.page.goto(url="https://digital.fidelity.com/ftgw/digital/transfer/?quicktransfer=cash-shares")
+        self.page.wait_for_load_state("load")
+        self.wait_for_loading_sign()
+        
+        # Select the source account
+        self.page.get_by_label("From").select_option(source_account)
+        self.wait_for_loading_sign()
+
+        # Ensure account has the money to transfer
+        available = self.page.query_selector("tr.pvd-table__row:nth-child(2) > td:nth-child(2)").text_content()
+        available = float(available.replace("$", ""))
+        pass
+
 # --------------------------------------- TEST AREA --------------------------------------- #
 # Create fidelity driver class
 browser = FidelityAutomation(headless=False, save_state=False)
@@ -926,12 +950,13 @@ try:
             save_device=False,
         )
         print("Logged in")
-        # success, account_num = browser.open_account("brokerage", source_account="Z24936689")
-        # if success:
-        #     print("Success")
-        # if account_num:
-        #     print(account_num)
-        browser.enable_pennystock_trading("Z27902404")
+        success, account_num = browser.open_account("brokerage")
+        if success:
+            print("Success")
+        if account_num:
+            print(account_num)
+        account_num = input("Enter account number for pennystock trading  ")
+        browser.enable_pennystock_trading(account_num)
 except Exception as e:
     print(e)
 
