@@ -751,13 +751,8 @@ class FidelityAutomation:
             self.page.get_by_role("button", name="Open account").click()
             self.wait_for_loading_sign()
 
-            # Navigate to the dashboard
-            self.page.goto("https://digital.fidelity.com/ftgw/digital/portfolio/summary")
-            self.wait_for_loading_sign()
-
-            # Click on the message bell button
-            sleep(5)
-            self.page.get_by_role("link", name="Messages ").click()
+            # Navigate to the Message center
+            self.page.goto("https://servicemessages.fidelity.com/ftgw/amtd/messageCenter")
             self.wait_for_loading_sign()
 
             # Get the account number from the first row of the messages table
