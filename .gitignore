@@ -7,3 +7,5 @@ Ref
 *.pdf
 *.PDF
 *.txt
+*env
+*.json
