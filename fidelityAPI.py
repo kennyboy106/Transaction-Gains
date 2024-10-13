@@ -14,7 +14,6 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 from playwright_stealth import StealthConfig, stealth_sync  
 import csv
 from enum import Enum
-from time import sleep
 
 
 # Needed for the download_prev_statement function
@@ -37,23 +36,35 @@ class fid_months(Enum):
 
 class FidelityAutomation:
     """
-    A class to manage and control a playwright webdriver with Fidelity
+    A class to manage and control a playwright webdriver with Fidelity.
+    If you have multiple login sets and want to use cookies, make sure "title" is unique each time you create this class,
+    otherwise the cookies will be overwritten each time. 
+
+    Parameters:
+        headless: bool: If False the browser will be headless.
+        title: str: The title of this session. Used for cookies file is present.
+        source_account: str: Account to use as the "From" account for transfers.
+        save_state: bool: Determine whether to save cookies in a json file.
+        profile_path: str: Path used to store browser session data.
+
     """
 
-    def __init__(self, headless=True, title=None, save_state: bool = True, profile_path=".") -> None:
+    def __init__(self, headless: bool =True, title: str = None, source_account: str = None, save_state: bool = True, profile_path: str = ".") -> None:
         # Setup the webdriver
         self.headless: bool = headless
         self.title: str = title
         self.save_state: bool = save_state
         self.profile_path: str = profile_path
-        self.account_dict: dict = {}
-        self.new_account_number = None
         self.stealth_config = StealthConfig(
             navigator_languages=False,
             navigator_user_agent=False,
             navigator_vendor=False,
         )
         self.getDriver()
+        # Some class variables
+        self.account_dict: dict = {}
+        self.source_account = source_account
+        self.new_account_number = None
 
     def getDriver(self):
         """
@@ -66,12 +77,16 @@ class FidelityAutomation:
         # Create or load cookies if save_state is set
         if self.save_state:
             self.profile_path = os.path.abspath(self.profile_path)
+            # If title was given
             if self.title is not None:
+                # Use the title for the json file
                 self.profile_path = os.path.join(
                     self.profile_path, f"Fidelity_{self.title}.json"
                 )
             else:
+                # Use default name for json file
                 self.profile_path = os.path.join(self.profile_path, "Fidelity.json")
+            # If the path supplied doesn't exist, make it
             if not os.path.exists(self.profile_path):
                 os.makedirs(os.path.dirname(self.profile_path), exist_ok=True)
                 with open(self.profile_path, "w") as f:
@@ -122,6 +137,12 @@ class FidelityAutomation:
         """
         Logs into fidelity using the supplied username and password.
 
+        Parameters:
+            username: str: The username of the user.
+            password: str: The password of the user.
+            totp_secret: str: The totp secret, if using, of the user.
+            save_device: bool: Flag to allow fidelity to remember this device.
+
         Returns:
             True, True: If completely logged in, return (True, True)
             True, False: If 2FA is needed, this function will return (True, False) which signifies that the
@@ -145,7 +166,7 @@ class FidelityAutomation:
             self.wait_for_loading_sign()
 
             # See if the summary page has been reached
-            self.page.wait_for_load_state(timeout=60000, state="load")
+            # self.page.wait_for_load_state(timeout=60000, state="load")
             if "summary" in self.page.url:
                 return (True, True)
 
@@ -183,11 +204,6 @@ class FidelityAutomation:
                         "https://digital.fidelity.com/ftgw/digital/portfolio/summary",
                         timeout=5000,
                     )
-
-                    # After successful login, store the source account if provided
-                    if source_account:
-                        self.source_account = source_account
-                    print(f"Source account saved: {self.source_account}")
 
                     # Got to the summary page, return True
                     return (True, True)
@@ -576,121 +592,11 @@ class FidelityAutomation:
         except Exception as e:
             return (False, e)
 
-    def getAccountInfo(self):
-        """
-        Gets account numbers, account names, and account totals by downloading the csv of positions from fidelity.
-
-        Post Conditions:
-            self.account_dict is populated with holdings for each account
-        Returns:
-            account_dict: dict: A dictionary using account numbers as keys. Each key holds a dict which has:
-            'balance': float: Total account balance
-            'type': str: The account nickname or default name
-            'stocks': list: A list of dictionaries for each stock found. The dict has:
-                'ticker': str: The ticker of the stock held
-                'quantity': str: The quantity of stocks with 'ticker' held
-                'last_price': str: The last price of the stock with the $ sign removed
-                'value': str: The total value of the position
-        """
-        # Go to positions page
-        self.page.goto("https://digital.fidelity.com/ftgw/digital/portfolio/positions")
-
-        # Download the positions as a csv
-        with self.page.expect_download() as download_info:
-            self.page.get_by_label("Download Positions").click()
-        download = download_info.value
-        cur = os.getcwd()
-        positions_csv = os.path.join(cur, download.suggested_filename)
-        # Create a copy to work on with the proper file name known
-        download.save_as(positions_csv)
-
-        csv_file = open(positions_csv, newline="", encoding="utf-8-sig")
-
-        reader = csv.DictReader(csv_file)
-        # Ensure all fields we want are present
-        required_elements = [
-            "Account Number",
-            "Account Name",
-            "Symbol",
-            "Description",
-            "Quantity",
-            "Last Price",
-            "Current Value",
-        ]
-        intersection_set = set(reader.fieldnames).intersection(set(required_elements))
-        if len(intersection_set) != len(required_elements):
-            raise Exception("Not enough elements in fidelity positions csv")
-
-        for row in reader:
-            # Last couple of rows have some disclaimers, filter those out
-            if row["Account Number"] is not None and "and" in str(
-                row["Account Number"]
-            ):
-                break
-            # Get the value and remove '$' from it
-            val = str(row["Current Value"]).replace("$", "")
-            # Get the last price
-            last_price = str(row["Last Price"]).replace("$", "")
-            # Get quantity
-            quantity = row["Quantity"]
-            # Get ticker
-            ticker = str(row["Symbol"])
-
-            # Don't include this if present
-            if "Pending" in ticker:
-                continue
-            # If the value isn't present, move to next row
-            if len(val) == 0:
-                continue
-            if val.lower() == "n/a":
-                val = 0
-            # If the last price isn't available, just use the current value
-            if len(last_price) == 0:
-                last_price = val
-            # If the quantity is missing, just use 1
-            if len(quantity) == 0:
-                quantity = 1
-
-            # If the account number isn't populated yet, add it
-            if row["Account Number"] not in self.account_dict:
-                # Add retrieved info.
-                # Yeah I know is kinda messy and hard to think about but it works
-                # Just need a way to store all stocks with the account number
-                # 'stocks' is a list of dictionaries. Each ticker gets its own index and is described by a dictionary
-                self.account_dict[row["Account Number"]] = {
-                    "balance": float(val),
-                    "type": row["Account Name"],
-                    "stocks": [
-                        {
-                            "ticker": ticker,
-                            "quantity": quantity,
-                            "last_price": last_price,
-                            "value": val,
-                        }
-                    ],
-                }
-            # If it is present, add to it
-            else:
-                self.account_dict[row["Account Number"]]["stocks"].append(
-                    {
-                        "ticker": ticker,
-                        "quantity": quantity,
-                        "last_price": last_price,
-                        "value": val,
-                    }
-                )
-                self.account_dict[row["Account Number"]]["balance"] += float(val)
-
-        # Close the file
-        csv_file.close()
-        os.remove(positions_csv)
-
-        return self.account_dict
-
-    def open_account(self, 
-        type: typing.Optional[Literal["roth", "brokerage"]] = None, 
+    def open_account(
+        self,
+        type: typing.Optional[Literal["roth", "brokerage"]] = None,
         transfer: float = None
-        ):
+    ):
 
         """
         Parameters:
@@ -700,7 +606,7 @@ class FidelityAutomation:
         # TEST FLAG TO ENSURE NO ACCIDENTAL OPENING
         print("OPENING ACCOUNT, PLEASE CONTINUE")
     
-        # self.page.pause()
+        self.page.pause()
         
         # works now with accoount opening and getting new account number
         if type == "roth":
@@ -708,7 +614,7 @@ class FidelityAutomation:
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation")
             self.wait_for_loading_sign()
 
-            # open an account
+            # Open an account
             self.page.get_by_role("button", name="Open account").click()
             self.wait_for_loading_sign()
             congrats_message = self.page.get_by_role("heading", name="Congratulations, your account")
@@ -719,19 +625,22 @@ class FidelityAutomation:
             self.wait_for_loading_sign()
 
             # Get the account number from the first row of the messages table
-            message_table = self.page.locator(".messages-table")
-            first_row = message_table.locator("tbody tr").first
-            account_cell = first_row.locator("td:nth-child(4)")  # 4th column is the Account column
-            account_text = account_cell.inner_text()
-
-            # Extract the account number using regex
-            match = re.search(r'ROTH IRA\s*\((\d+)\)', account_text)
-            if match:
-                self.new_account_number = match.group(1)
-                print(f"New Roth IRA account number found: {self.new_account_number}")
-            else:
-                print("Could not find Roth IRA account number in the message table.")
+            if not self.find_new_account_number(type="roth"):
                 return (False, None)
+
+            # message_table = self.page.locator(".messages-table")
+            # first_row = message_table.locator("tbody tr").first
+            # account_cell = first_row.locator("td:nth-child(4)")  # 4th column is the Account column
+            # account_text = account_cell.inner_text()
+
+            # # Extract the account number using regex
+            # match = re.search(r'ROTH IRA\s*\((\d+)\)', account_text)
+            # if match:
+            #     self.new_account_number = match.group(1)
+            #     print(f"New Roth IRA account number found: {self.new_account_number}")
+            # else:
+            #     print("Could not find Roth IRA account number in the message table.")
+            #     return (False, None)
 
         # got brokerage working
         if type == "brokerage":
@@ -739,9 +648,10 @@ class FidelityAutomation:
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/JointSelectionPage")
             self.wait_for_loading_sign()
 
-            # First section
-            self.page.get_by_role("button", name="Next").click()
-            self.wait_for_loading_sign()
+            # First section (This won't be present if an application was already started)
+            if self.page.get_by_role("heading", name="Account ownership").is_visible():
+                self.page.get_by_role("button", name="Next").click()
+                self.wait_for_loading_sign()
 
             # If application is already started, then there will only be 1 "Next" button
             self.page.get_by_role("button", name="Next").click()
@@ -752,23 +662,25 @@ class FidelityAutomation:
             self.wait_for_loading_sign()
 
             # Navigate to the Message center
-            self.page.goto("https://servicemessages.fidelity.com/ftgw/amtd/messageCenter")
-            self.wait_for_loading_sign()
-
-            # Get the account number from the first row of the messages table
-            message_table = self.page.locator(".messages-table")
-            first_row = message_table.locator("tbody tr").first
-            account_cell = first_row.locator("td:nth-child(4)")  # 4th column is the Account column
-            account_text = account_cell.inner_text()
-            
-            # Extract the account number from the text (it's in parentheses)
-            match = re.search(r'\((Z\d+)\)', account_text)
-            if match:
-                self.new_account_number = match.group(1)
-                print(f"New account created: {self.new_account_number}")
-            else:
-                print("Could not find account number in the message table.")
+            if not self.find_new_account_number(type="brokerage"):
                 return (False, None)
+            # self.page.goto("https://servicemessages.fidelity.com/ftgw/amtd/messageCenter")
+            # self.wait_for_loading_sign()
+
+            # # Get the account number from the first row of the messages table
+            # message_table = self.page.locator(".messages-table")
+            # first_row = message_table.locator("tbody tr").first
+            # account_cell = first_row.locator("td:nth-child(4)")  # 4th column is the Account column
+            # account_text = account_cell.inner_text()
+            
+            # # Extract the account number from the text (it's in parentheses)
+            # match = re.search(r'\((Z\d+)\)', account_text)
+            # if match:
+            #     self.new_account_number = match.group(1)
+            #     print(f"New account created: {self.new_account_number}")
+            # else:
+            #     print("Could not find account number in the message table.")
+            #     return (False, None)
             
         if self.new_account_number:
             
@@ -784,7 +696,34 @@ class FidelityAutomation:
         
         return (False, None)
 
-            
+    def find_new_account_number(
+        self,
+        type: typing.Optional[Literal["roth", "brokerage"]],
+    ):
+        # Navigate to the Message center
+        self.page.goto("https://servicemessages.fidelity.com/ftgw/amtd/messageCenter")
+        self.wait_for_loading_sign()
+
+        # Get the account number from the first row of the messages table
+        message_table = self.page.locator(".messages-table")
+        first_row = message_table.locator("tbody tr").first
+        account_cell = first_row.locator("td:nth-child(4)")  # 4th column is the Account column
+        account_text = account_cell.inner_text()
+        
+        # Extract the account number from the text (it's in parentheses)
+        if type == "roth":
+            match = re.search(r'ROTH IRA\s*\((\d+)\)', account_text)
+        elif type == "brokerage":
+            match = re.search(r'\((Z\d+)\)', account_text)
+
+        if match:
+            self.new_account_number = match.group(1)
+            print(f"New account found: {self.new_account_number}")
+            return True
+        else:
+            print("Could not new find account number in the message table.")
+            return False
+
     def fund_account(self, source_account: str, new_account_number: str, transfer_amount: float) -> bool:
         """
         Funds the newly created account by transferring money from a source account.
