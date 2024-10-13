@@ -682,10 +682,10 @@ class FidelityAutomation:
             #     print("Could not find account number in the message table.")
             #     return (False, None)
             
-        if self.new_account_number:
+        if transfer is not None and self.new_account_number:
             
             # Start funding the account
-            new_account = self.fund_account(self.source_account, self.new_account_number, transfer)
+            new_account = self.transfer_acc_to_acc(self.source_account, self.new_account_number, transfer)
             
             if new_account:
                 print(f"Successfully funded your account: {self.new_account_number} ")
@@ -700,6 +700,17 @@ class FidelityAutomation:
         self,
         type: typing.Optional[Literal["roth", "brokerage"]],
     ):
+        """
+        Finds the account number for new accounts created through the Message Center.
+        Currently only has functionality for finding Roth and Individual accounts.
+        This will print a confirmation message of the results upon completion.
+
+        Parameters:
+            type: str: What type of account to find.
+
+        Post Conditions:
+            Assigns self.new_account_number to the account number found.        
+        """
         # Navigate to the Message center
         self.page.goto("https://servicemessages.fidelity.com/ftgw/amtd/messageCenter")
         self.wait_for_loading_sign()
@@ -724,14 +735,14 @@ class FidelityAutomation:
             print("Could not new find account number in the message table.")
             return False
 
-    def fund_account(self, source_account: str, new_account_number: str, transfer_amount: float) -> bool:
+    def transfer_acc_to_acc(self, source_account: str, destination_account: str, transfer_amount: float) -> bool:
         """
         Funds the newly created account by transferring money from a source account.
         
-        Args:
-        source_account (str): The account number of the source account.
-        new_account_number (str): The account number of the newly created account.
-        transfer_amount (float): The amount to transfer.
+        Parameters:
+            source_account (str): The account number of the source account.
+            destination_account (str): The account number of the destination account.
+            transfer_amount (float): The amount to transfer.
         
         Returns:
         bool: True if the transfer was successful, False otherwise.
@@ -760,17 +771,17 @@ class FidelityAutomation:
             # Select the new account from the 'To' dropdown
             to_select = self.page.get_by_label("To", exact=True)
             options = to_select.locator("option").all()
-            new_account_value = None
+            destination_value = None
             for option in options:
-                if new_account_number in option.inner_text():
-                    new_account_value = option.get_attribute("value")
+                if destination_account in option.inner_text():
+                    destination_value = option.get_attribute("value")
                     break
             
-            if new_account_value is None:
-                print(f"New account {new_account_number} not found in 'To' dropdown")
+            if destination_value is None:
+                print(f"Account {destination_account} not found in 'To' dropdown")
                 return False
             
-            to_select.select_option(new_account_value)
+            to_select.select_option(destination_value)
             self.wait_for_loading_sign()
 
             # Get the available balance
@@ -794,7 +805,7 @@ class FidelityAutomation:
             # Check if the transfer was successful
             success_message = self.page.get_by_role("heading", name="You've submitted the transfer")
             if success_message.is_visible():
-                print(f"Successfully transferred ${transfer_amount} from account {source_account} to new account {new_account_number}")
+                print(f"Successfully transferred ${transfer_amount} from account {source_account} to new account {destination_account}")
                 return True
             else:
                 print("Transfer submission failed")
@@ -803,8 +814,6 @@ class FidelityAutomation:
         except Exception as e:
             print(f"An error occurred during the transfer: {str(e)}")
             return False
-       
-        
 
     def enable_pennystock_trading(self, account: str) -> bool:
         """
@@ -896,6 +905,14 @@ class FidelityAutomation:
         return statement
 
     def wait_for_loading_sign(self, timeout: int = 30000):
+        """
+        Waits for known loading signs present in Fidelity by looping through a list of discovered types.
+        Each iteration uses the timeout given.
+
+        Parameters:
+            timeout (int): The number of milliseconds to wait before throwing a PlaywrightTimeoutError exception
+        """
+        
         # Wait for all kinds of loading signs
         signs = [self.page.locator("div:nth-child(2) > .loading-spinner-mask-after").first,
                  self.page.locator(".pvd-spinner__mask-inner").first,
@@ -904,104 +921,95 @@ class FidelityAutomation:
         for sign in signs:
             sign.wait_for(timeout=timeout, state="hidden") 
 
-    def transfer_acc_to_acc(self, source_account: str, destination_account: str):
-        """
-        WORK IN PROGRESS. NOT FULLY IMPLEMENTED
-        """
-        # Go to the transfer between accounts page
-        self.page.goto(url="https://digital.fidelity.com/ftgw/digital/transfer/?quicktransfer=cash-shares")
-        self.page.wait_for_load_state("load")
-        self.wait_for_loading_sign()
-        
-        # Select the source account
-        self.page.get_by_label("From").select_option(source_account)
-        self.wait_for_loading_sign()
-
-        # Ensure account has the money to transfer
-        available = self.page.query_selector("tr.pvd-table__row:nth-child(2) > td:nth-child(2)").text_content()
-        available = float(available.replace("$", ""))
-        pass
-
 # --------------------------------------- TEST AREA --------------------------------------- #
-# Create fidelity driver class
-browser = FidelityAutomation(headless=False, save_state=False)
-try:
-    # Delete old variable in envrionment
-    if os.getenv("FIDELITY"):
-        os.environ.pop("FIDELITY")
-    # Initialize .env file
-    load_dotenv()
-    # Import Fidelity account
-    if not os.getenv("FIDELITY"):
-        raise Exception("Fidelity not found, skipping...")
 
-    accounts = (os.environ["FIDELITY"].strip().split(","))
-    for account in accounts:
-        account = account.split(':')
-        step_1, step_2 = browser.login(
-            username=account[0],
-            password=account[1],
-            totp_secret=account[2] if len(account) > 2 else None,
-            source_account=account[3],
-            save_device=False,
-        )
-        print("Logged in")
-
-        # User input for account type and transfer amount
-        account_type = input("Enter account type to open (roth/brokerage): ").lower()
-        while account_type not in ["roth", "brokerage"]:
-            account_type = input("Invalid input. Please enter 'roth' or 'brokerage': ").lower()
-        
-        transfer_amount = float(input("Enter the amount to transfer to the new account: "))
-        
-        success, account_num = browser.open_account(account_type, transfer_amount)
-        
-        if success:
-            print(f"Successfully opened {account_type} account")
-        if account_num:
-            print(f"New account number: {account_num}")
-        
-        enable_penny_stocks = input("Do you want to enable penny stock trading for this account? (y/n): ").lower()
-        if enable_penny_stocks == 'y':
-            browser.enable_pennystock_trading(account_num)
-            print("Penny stock trading enabled")
-except Exception as e:
-    print(e)
-
-exit_con = 1
-while exit_con:
-
-    browser.page.pause()
-    choice = input("""
-                   0: Quit\n
-                   1: locator string\n
-                   2: CSS selector string\n
-                   3: Get by text\n
-                   4: Get by role\n
-                   5: Get by label\n
-                   6: Goto url\n
-                   7: Get text of CSS selector\n
-                   """)
-    choice = int(choice)
+if __name__ == "__main__":
     try:
-        if choice > 0:
-            str_in = input("Enter the str to click")
-            if choice == 1:
-                browser.page.locator(str_in).click()
-            if choice == 2:
-                browser.page.query_selector(str_in).click()
-            if choice == 3:
-                browser.page.get_by_text(str_in).click()
-            if choice == 4:
-                browser.page.get_by_role(str_in).click()
-            if choice == 5:
-                browser.page.get_by_label(str_in).click()
-            if choice == 6:
-                browser.page.goto(str_in)
-            if choice == 7:
-                print(browser.page.query_selector(str_in).text_content())
-        else:
-            exit_con = 0
-    except:
-        pass
+        # Delete old variable in environment
+        if os.getenv("FIDELITY"):
+            os.environ.pop("FIDELITY")
+        # Initialize .env file
+        load_dotenv()
+        # Import Fidelity account
+        if not os.getenv("FIDELITY"):
+            raise Exception("Fidelity not found, skipping...")
+
+
+
+        accounts = (os.environ["FIDELITY"].strip().split(","))
+        for account in accounts:
+            
+            # Create fidelity driver class
+            browser = FidelityAutomation(
+                headless=False,
+                save_state=False,
+                source_account=account[3] if len(account) > 3 else None
+            )
+            
+            account = account.split(':')
+            step_1, step_2 = browser.login(
+                username=account[0],
+                password=account[1],
+                totp_secret=account[2] if len(account) > 2 else None,
+                save_device=False,
+            )
+            print("Logged in")
+
+            # User input for account type and transfer amount
+            account_type = input("Enter account type to open (roth/brokerage): ").lower()
+            while account_type not in ["roth", "brokerage"]:
+                account_type = input("Invalid input. Please enter 'roth' or 'brokerage': ").lower()
+            
+            transfer_amount = float(input("Enter the amount to transfer to the new account: "))
+            
+            success, account_num = browser.open_account(account_type, transfer_amount)
+            
+            if success:
+                print(f"Successfully opened {account_type} account")
+            if account_num:
+                print(f"New account number: {account_num}")
+            
+            enable_penny_stocks = input("Do you want to enable penny stock trading for this account? (y/n): ").lower()
+            if enable_penny_stocks == 'y':
+                browser.enable_pennystock_trading(account_num)
+                print("Penny stock trading enabled")
+    except Exception as e:
+        print(e)
+
+    exit_con = 1
+    while exit_con:
+
+        browser.page.pause()
+        choice = input("""
+                    0: Quit\n
+                    1: locator string\n
+                    2: CSS selector string\n
+                    3: Get by text\n
+                    4: Get by role\n
+                    5: Get by label\n
+                    6: Goto url\n
+                    7: Get text of CSS selector\n
+                    """)
+        choice = int(choice)
+        try:
+            if choice > 0:
+                str_in = input("Enter the str to click")
+                if choice == 1:
+                    browser.page.locator(str_in).click()
+                if choice == 2:
+                    browser.page.query_selector(str_in).click()
+                if choice == 3:
+                    browser.page.get_by_text(str_in).click()
+                if choice == 4:
+                    browser.page.get_by_role(str_in).click()
+                if choice == 5:
+                    browser.page.get_by_label(str_in).click()
+                if choice == 6:
+                    browser.page.goto(str_in)
+                if choice == 7:
+                    print(browser.page.query_selector(str_in).text_content())
+            else:
+                exit_con = 0
+        except:
+            pass
         
