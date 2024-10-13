@@ -702,19 +702,36 @@ class FidelityAutomation:
     
         # self.page.pause()
         
-        # Still need work on roth 
+        # works now with accoount opening and getting new account number
         if type == "roth":
+            # Go to open roth page
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation")
             self.wait_for_loading_sign()
 
+            # open an account
             self.page.get_by_role("button", name="Open account").click()
             self.wait_for_loading_sign()
             congrats_message = self.page.get_by_role("heading", name="Congratulations, your account")
             congrats_message.wait_for(state="visible")
 
-            # Get the account number
-            account_number = self.page.get_by_role("heading", name="Your account number is").text_content()
-            self.new_account_number = account_number.replace("Your account number is ", "").strip()
+            # Navigate to the Message center
+            self.page.goto("https://servicemessages.fidelity.com/ftgw/amtd/messageCenter")
+            self.wait_for_loading_sign()
+
+            # Get the account number from the first row of the messages table
+            message_table = self.page.locator(".messages-table")
+            first_row = message_table.locator("tbody tr").first
+            account_cell = first_row.locator("td:nth-child(4)")  # 4th column is the Account column
+            account_text = account_cell.inner_text()
+
+            # Extract the account number using regex
+            match = re.search(r'ROTH IRA\s*\((\d+)\)', account_text)
+            if match:
+                self.new_account_number = match.group(1)
+                print(f"New Roth IRA account number found: {self.new_account_number}")
+            else:
+                print("Could not find Roth IRA account number in the message table.")
+                return (False, None)
 
         # got brokerage working
         if type == "brokerage":
