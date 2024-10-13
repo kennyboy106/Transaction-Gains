@@ -8,11 +8,14 @@ from dotenv import load_dotenv
 import pyotp
 import typing
 from typing import Literal
+import re
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import StealthConfig, stealth_sync  
 import csv
 from enum import Enum
+from time import sleep
+
 
 # Needed for the download_prev_statement function
 class fid_months(Enum):
@@ -44,6 +47,7 @@ class FidelityAutomation:
         self.save_state: bool = save_state
         self.profile_path: str = profile_path
         self.account_dict: dict = {}
+        self.new_account_number = None
         self.stealth_config = StealthConfig(
             navigator_languages=False,
             navigator_user_agent=False,
@@ -114,7 +118,7 @@ class FidelityAutomation:
         # Stop the instance of playwright
         self.playwright.stop()
 
-    def login(self, username: str, password: str, totp_secret: str = None, save_device: bool = True) -> bool:
+    def login(self, username: str, password: str, totp_secret: str = None, save_device: bool = True, source_account: str = None) -> bool:
         """
         Logs into fidelity using the supplied username and password.
 
@@ -179,6 +183,12 @@ class FidelityAutomation:
                         "https://digital.fidelity.com/ftgw/digital/portfolio/summary",
                         timeout=5000,
                     )
+
+                    # After successful login, store the source account if provided
+                    if source_account:
+                        self.source_account = source_account
+                    print(f"Source account saved: {self.source_account}")
+
                     # Got to the summary page, return True
                     return (True, True)
 
@@ -677,139 +687,173 @@ class FidelityAutomation:
 
         return self.account_dict
 
-    def open_account(
-            self,
-            type: typing.Optional[Literal["roth", "brokerage"]] = None,
-            transfer: float = None,
-            source_account: str = None,
+    def open_account(self, 
+        type: typing.Optional[Literal["roth", "brokerage"]] = None, 
+        transfer: float = None
         ):
+
         """
         Parameters:
             type: str: The type of account to open.
+            transfer: float: amount of money you want to transfer
         """
         # TEST FLAG TO ENSURE NO ACCIDENTAL OPENING
         print("OPENING ACCOUNT, PLEASE CONTINUE")
-        self.page.pause()
-
+    
+        # self.page.pause()
+        
+        # Still need work on roth 
         if type == "roth":
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation")
             self.wait_for_loading_sign()
+
             self.page.get_by_role("button", name="Open account").click()
             self.wait_for_loading_sign()
             congrats_message = self.page.get_by_role("heading", name="Congratulations, your account")
             congrats_message.wait_for(state="visible")
 
-            # Get the account number among other things
-            account = self.page.get_by_role("heading", name="Your account number is").text_content()
-            account = account.replace("Your account number is ", "")
-            
-            # Work in progress. See below commented block for more details
-            """
-            # If transfering do that
-            if (transfer is not None
-                and float(transfer) > 0
-                and source_account is not None
-            ):
-                self.page.get_by_role("button", name="Next").click()
-                self.wait_for_loading_sign()
-                self.page.get_by_text("Other funding options").click()
-                self.page.locator("label").filter(has_text="Transfer between Fidelity").click()
-                self.page.get_by_role("button", name="Continue").click()
-                # Double loading sign
-                self.wait_for_loading_sign()
-                self.page.wait_for_load_state(state="load")
-                self.wait_for_loading_sign()
-                # Use source account
-                self.page.query_selector("#From-acct-select").click()
-                self.page.get_by_role("option").filter(has_text=source_account.upper()).click()
-            """
-            return (True, account)
+            # Get the account number
+            account_number = self.page.get_by_role("heading", name="Your account number is").text_content()
+            self.new_account_number = account_number.replace("Your account number is ", "").strip()
 
+        # got brokerage working
         if type == "brokerage":
-            # Go to individual brokerage page
+            # # Go to individual brokerage page
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/JointSelectionPage")
             self.wait_for_loading_sign()
 
             # First section
-            if self.page.get_by_role("heading", name="Account ownership").is_visible():
-                self.page.get_by_role("button", name="Next").click()
-                self.wait_for_loading_sign()
+            self.page.get_by_role("button", name="Next").click()
+            self.wait_for_loading_sign()
 
             # If application is already started, then there will only be 1 "Next" button
-            if self.page.get_by_role("heading", name="Where your cash will be held").is_visible():
-                self.page.get_by_role("button", name="Next").click()
-                self.wait_for_loading_sign()
-
-            # Open the account
-            self.page.get_by_role("button", name="Open account").click()
-            self.wait_for_loading_sign(timeout=60000)
-                
-            # TODO need another wait here for a different loading symbol used
-            # Wait for account to open and page to load
-            self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/bank-setup/funding", timeout=60000)
+            self.page.get_by_role("button", name="Next").click()
             self.wait_for_loading_sign()
-            """
-            new_account = None
-            # Get the new account number
-            if source_account is not None:
-                self.page.get_by_text("Checkmark Icon Other options").click()
-                self.wait_for_loading_sign()
-                self.page.get_by_text("Transfer from another").click()
-                self.page.get_by_role("button", name="Continue").click()
-                self.page.wait_for_load_state(state="load")
-                self.wait_for_loading_sign()
-
-                # Use source account
-                # This does not seem to work. 
-                # The dropdown uses some sequence of numbers for which account is in the list
-                self.page.query_selector("#From-acct-select").click()
-                self.page.get_by_role("option").filter(has_text=source_account.upper()).click()
-                self.wait_for_loading_sign()
-
-                # Ensure account has the money to transfer
-                available = self.page.query_selector("tr.pvd-table__row:nth-child(2) > td:nth-child(2)").text_content()
-                available = float(available.replace("$", ""))
-
-                # Get the new account number while we are here
-                new_account = self.page.query_selector("#To-acct-select").text_content()
             
-            # Actually transfer some money
-            if (transfer is not None
-                and float(transfer > 0)
-            ):
-                # Enter the amount to transfer
-                self.page.get_by_label("Transfer amount").click()
-                self.page.get_by_label("Transfer amount").fill(str(transfer))
-                if transfer < available:
-                    raise Exception("New account opened but source account has insufficient funds")
+            # Open account
+            self.page.get_by_role("button", name="Open account").click()
+            self.wait_for_loading_sign()
 
-                # Submit the transfer
-                self.page.get_by_role("button", name="Continue").click()
-                self.wait_for_loading_sign()
-                self.page.get_by_role("button", name="Submit").click()
-                self.wait_for_loading_sign()
-                if self.page.get_by_role("heading", name="You've submitted the transfer").is_visible():
-                    # Return to summary page
-                    self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
-                    return (True, new_account)
-            """
-            # Return to summary page
-            self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
-            # All done
-            return (True, None)
-            # Funding the account should be done in its own step. How can I return the account number of the new account created?
+            # Navigate to the dashboard
+            self.page.goto("https://digital.fidelity.com/ftgw/digital/portfolio/summary")
+            self.wait_for_loading_sign()
+
+            # Click on the message bell button
+            sleep(5)
+            self.page.get_by_role("link", name="Messages ").click()
+            self.wait_for_loading_sign()
+
+            # Get the account number from the first row of the messages table
+            message_table = self.page.locator(".messages-table")
+            first_row = message_table.locator("tbody tr").first
+            account_cell = first_row.locator("td:nth-child(4)")  # 4th column is the Account column
+            account_text = account_cell.inner_text()
             
-    def get_new_account_number(self):
-        # One idea for this is to move every account out of the INVESTMENT category or Retirement category.
-        # Doing this would leave only 1 account in there and i can easily get the account number from there. 
+            # Extract the account number from the text (it's in parentheses)
+            match = re.search(r'\((Z\d+)\)', account_text)
+            if match:
+                self.new_account_number = match.group(1)
+                print(f"New account created: {self.new_account_number}")
+            else:
+                print("Could not find account number in the message table.")
+                return (False, None)
+            
+        if self.new_account_number:
+            
+            # Start funding the account
+            new_account = self.fund_account(self.source_account, self.new_account_number, transfer)
+            
+            if new_account:
+                print(f"Successfully funded your account: {self.new_account_number} ")
+                return (True, self.new_account_number)
+            else:
+                print(f"Failed to transfer your account funds")
+                return (False, None)
+        
+        return (False, None)
 
-        # The best way is to just select the account transfer right after the opening of the account.
-        # The new account number is autopopulted in the second box
-        self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/summary")
+            
+    def fund_account(self, source_account: str, new_account_number: str, transfer_amount: float) -> bool:
+        """
+        Funds the newly created account by transferring money from a source account.
+        
+        Args:
+        source_account (str): The account number of the source account.
+        new_account_number (str): The account number of the newly created account.
+        transfer_amount (float): The amount to transfer.
+        
+        Returns:
+        bool: True if the transfer was successful, False otherwise.
+        """
+        try:
+            # Navigate to the transfer page
+            self.page.goto(url="https://digital.fidelity.com/ftgw/digital/transfer/?quicktransfer=cash-shares")
+            self.wait_for_loading_sign()
 
-        # Open account button
-        # get_by_role("button", name="Open account")
-        pass
+            # Select the source account from the 'From' dropdown
+            from_select = self.page.get_by_label("From")
+            options = from_select.locator("option").all()
+            source_value = None
+            for option in options:
+                if source_account in option.inner_text():
+                    source_value = option.get_attribute("value")
+                    break
+            
+            if source_value is None:
+                print(f"Source account {source_account} not found in dropdown")
+                return False
+            
+            from_select.select_option(source_value)
+            self.wait_for_loading_sign()
+
+            # Select the new account from the 'To' dropdown
+            to_select = self.page.get_by_label("To", exact=True)
+            options = to_select.locator("option").all()
+            new_account_value = None
+            for option in options:
+                if new_account_number in option.inner_text():
+                    new_account_value = option.get_attribute("value")
+                    break
+            
+            if new_account_value is None:
+                print(f"New account {new_account_number} not found in 'To' dropdown")
+                return False
+            
+            to_select.select_option(new_account_value)
+            self.wait_for_loading_sign()
+
+            # Get the available balance
+            available_balance = self.page.locator("tr.pvd-table__row:nth-child(2) > td:nth-child(2)").inner_text()
+            available_balance = float(available_balance.replace("$", "").replace(",", ""))
+
+            # Check if there's enough balance
+            if transfer_amount > available_balance:
+                print(f"Insufficient funds. Available: ${available_balance}, Attempted transfer: ${transfer_amount}")
+                return False
+
+            # Enter the transfer amount
+            self.page.locator("#transfer-amount").fill(str(transfer_amount))
+
+            # Submit the transfer
+            self.page.get_by_role("button", name="Continue").click()
+            self.wait_for_loading_sign()
+            self.page.get_by_role("button", name="Submit").click()
+            self.wait_for_loading_sign()
+
+            # Check if the transfer was successful
+            success_message = self.page.get_by_role("heading", name="You've submitted the transfer")
+            if success_message.is_visible():
+                print(f"Successfully transferred ${transfer_amount} from account {source_account} to new account {new_account_number}")
+                return True
+            else:
+                print("Transfer submission failed")
+                return False
+
+        except Exception as e:
+            print(f"An error occurred during the transfer: {str(e)}")
+            return False
+       
+        
 
     def enable_pennystock_trading(self, account: str) -> bool:
         """
@@ -947,16 +991,29 @@ try:
             username=account[0],
             password=account[1],
             totp_secret=account[2] if len(account) > 2 else None,
+            source_account=account[3],
             save_device=False,
         )
         print("Logged in")
-        success, account_num = browser.open_account("brokerage")
+
+        # User input for account type and transfer amount
+        account_type = input("Enter account type to open (roth/brokerage): ").lower()
+        while account_type not in ["roth", "brokerage"]:
+            account_type = input("Invalid input. Please enter 'roth' or 'brokerage': ").lower()
+        
+        transfer_amount = float(input("Enter the amount to transfer to the new account: "))
+        
+        success, account_num = browser.open_account(account_type, transfer_amount)
+        
         if success:
-            print("Success")
+            print(f"Successfully opened {account_type} account")
         if account_num:
-            print(account_num)
-        account_num = input("Enter account number for pennystock trading  ")
-        browser.enable_pennystock_trading(account_num)
+            print(f"New account number: {account_num}")
+        
+        enable_penny_stocks = input("Do you want to enable penny stock trading for this account? (y/n): ").lower()
+        if enable_penny_stocks == 'y':
+            browser.enable_pennystock_trading(account_num)
+            print("Penny stock trading enabled")
 except Exception as e:
     print(e)
 
