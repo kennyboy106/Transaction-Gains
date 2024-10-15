@@ -41,15 +41,16 @@ class FidelityAutomation:
     otherwise the cookies will be overwritten each time. 
 
     Parameters:
-        headless: bool: If False the browser will be headless.
-        title: str: The title of this session. Used for cookies file is present.
-        source_account: str: Account to use as the "From" account for transfers.
-        save_state: bool: Determine whether to save cookies in a json file.
-        profile_path: str: Path used to store browser session data.
+        headless (bool): If False the browser will be headless.
+        debug (bool): If the driver should print debug info. 
+        title (str): The title of this session. Used for cookies file is present.
+        source_account (str): Account to use as the "From" account for transfers.
+        save_state (bool): Determine whether to save cookies in a json file.
+        profile_path (str): Path used to store browser session data.
 
     """
 
-    def __init__(self, headless: bool =True, title: str = None, source_account: str = None, save_state: bool = True, profile_path: str = ".") -> None:
+    def __init__(self, headless: bool = True, debug: bool = False, title: str = None, source_account: str = None, save_state: bool = True, profile_path: str = ".") -> None:
         # Setup the webdriver
         self.headless: bool = headless
         self.title: str = title
@@ -62,6 +63,7 @@ class FidelityAutomation:
         )
         self.getDriver()
         # Some class variables
+        self.debug = debug
         self.account_dict: dict = {}
         self.source_account = source_account
         self.new_account_number = None
@@ -138,10 +140,10 @@ class FidelityAutomation:
         Logs into fidelity using the supplied username and password.
 
         Parameters:
-            username: str: The username of the user.
-            password: str: The password of the user.
-            totp_secret: str: The totp secret, if using, of the user.
-            save_device: bool: Flag to allow fidelity to remember this device.
+            username (str): The username of the user.
+            password (str): The password of the user.
+            totp_secret (str): The totp secret, if using, of the user.
+            save_device (bool): Flag to allow fidelity to remember this device.
 
         Returns:
             (True, True): If completely logged in
@@ -166,6 +168,7 @@ class FidelityAutomation:
 
             # See if the summary page has been reached
             # self.page.wait_for_load_state(timeout=60000, state="load")
+            # self.page.on(event="")
             if "summary" in self.page.url:
                 return (True, True)
 
@@ -246,8 +249,8 @@ class FidelityAutomation:
         Completes the 2FA portion of the login using a phone text code.
 
         Returns:
-            True: bool: If login succeeded, return true.
-            False: bool: If login failed, return false.
+            True (bool): If login succeeded, return true.
+            False (bool): If login failed, return false.
         """
         try:
             self.page.get_by_placeholder("XXXXXX").fill(code)
@@ -325,17 +328,21 @@ class FidelityAutomation:
             raise Exception("Not enough elements in fidelity positions csv")
 
         for row in reader:
+            # Skip empty rows
+            if row["Account Number"] is None:
+                continue
             # Last couple of rows have some disclaimers, filter those out
-            if row["Account Number"] is not None and "and" in str(
-                row["Account Number"]
-            ):
+            if "and" in row["Account Number"]:
                 break
+            # Skip accounts that start with 'Y' (Fidelity managed)
+            if row["Account Number"][0] == "Y":
+                continue
             # Get the value and remove '$' from it
-            val = str(row["Current Value"]).replace("$", "")
+            val = str(row["Current Value"]).replace("$", "").replace("-", "")
             # Get the last price
-            last_price = str(row["Last Price"]).replace("$", "")
+            last_price = str(row["Last Price"]).replace("$", "").replace("-", "")
             # Get quantity
-            quantity = row["Quantity"]
+            quantity = str(row["Quantity"]).replace("-", "")
             # Get ticker
             ticker = str(row["Symbol"])
 
@@ -350,7 +357,7 @@ class FidelityAutomation:
             # If the last price isn't available, just use the current value
             if len(last_price) == 0:
                 last_price = val
-            # If the quantity is missing, just use 1
+            # If the quantity is missing set it to 1 (SPAXX)
             if len(quantity) == 0:
                 quantity = 1
 
@@ -438,14 +445,14 @@ class FidelityAutomation:
             Places a market order for the security
 
         Parameters:
-            stock: str: The ticker that represents the security to be traded
-            quantity: float: The amount to buy or sell of the security
-            action: str: This must be 'buy' or 'sell'. It can be in any case state (i.e. 'bUY' is still valid)
-            account: str: The account number to trade under.
-            dry: bool: True for dry (test) run, False for real run.
+            stock (str): The ticker that represents the security to be traded
+            quantity (float): The amount to buy or sell of the security
+            action (str): This must be 'buy' or 'sell'. It can be in any case state (i.e. 'bUY' is still valid)
+            account (str): The account number to trade under.
+            dry (bool): True for dry (test) run, False for real run.
 
         Returns:
-            (Success: bool, Error_message: str) If the order was successfully placed or tested (for dry runs) then True is
+            Success (bool), Error_message (str) If the order was successfully placed or tested (for dry runs) then True is
             returned and Error_message will be None. Otherwise, False will be returned and Error_message will not be None
         """
         try:
@@ -471,7 +478,7 @@ class FidelityAutomation:
             self.page.get_by_label("Symbol").click()
             # Fill in the ticker
             self.page.get_by_label("Symbol").fill(stock)
-            # Find the symbol we wanted and click it
+            # Force the search to use exactly what was entered
             self.page.get_by_label("Symbol").press("Enter")
 
             # Wait for quote panel to show up
@@ -532,21 +539,24 @@ class FidelityAutomation:
 
             # If error occurred
             try:
-                self.page.get_by_role("button", name="Place order clicking this").wait_for(timeout=4000, state="visible")
+                self.page.get_by_role("button", name="Place order", exact=False).wait_for(timeout=4000, state="visible")
             except PlaywrightTimeoutError:
                 # Error must be present (or really slow page for some reason)
                 # Try to report on error
                 error_message = ""
                 filtered_error = ""
+                error_box_closed = False
                 try:
                     error_message = (self.page.get_by_label("Error").locator("div").filter(has_text="critical").nth(2).text_content(timeout=2000))
                     self.page.get_by_role("button", name="Close dialog").click()
+                    error_box_closed = True
                 except Exception:
                     pass
                 if error_message == "":
                     try:
                         error_message = self.page.wait_for_selector('.pvd-inline-alert__content font[color="red"]', timeout=2000).text_content()
                         self.page.get_by_role("button", name="Close dialog").click()
+                        error_box_closed = True
                     except Exception:
                         pass
                 # Return with error and trim it down (it contains many spaces for some reason)
@@ -560,10 +570,13 @@ class FidelityAutomation:
                             continue
                         filtered_error += character
 
-                    filtered_error = filtered_error.replace("critical", "").strip()
-                    error_message = filtered_error.replace("\n", "")
+                    error_message = filtered_error.replace("critical", "").strip().replace("\n", "")
                 else:
                     error_message = "Could not retrieve error message from popup"
+
+                # If the error box is still open, reload the page
+                if not error_box_closed:
+                    self.page.reload()
                 return (False, error_message)
 
             # If no error occurred, continue with checking the order preview
@@ -580,7 +593,7 @@ class FidelityAutomation:
                 self.page.get_by_role("button", name="Place order clicking this").click()
                 try:
                     # See that the order goes through
-                    self.page.get_by_text("Order received").wait_for(timeout=5000, state="visible")
+                    self.page.get_by_text("Order received", exact=True).wait_for(timeout=5000, state="visible")
                     # If no error, return with success
                     return (True, None)
                 except PlaywrightTimeoutError:
@@ -588,8 +601,8 @@ class FidelityAutomation:
                     return (False, "Order failed to complete")
             # If its a dry run, report back success
             return (True, None)
-        except PlaywrightTimeoutError:
-            return (False, "Driver timed out. Order not complete")
+        except PlaywrightTimeoutError as toe:
+            return (False, f"Driver timed out. Order not complete: {toe}")
         except Exception as e:
             return (False, e)
 
