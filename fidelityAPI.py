@@ -590,7 +590,7 @@ class FidelityAutomation:
 
             # If its a real run
             if not dry:
-                self.page.get_by_role("button", name="Place order clicking this").click()
+                self.page.get_by_role("button", name="Place order", exact=False).first.click()
                 try:
                     # See that the order goes through
                     self.page.get_by_text("Order received", exact=True).wait_for(timeout=5000, state="visible")
@@ -608,21 +608,21 @@ class FidelityAutomation:
 
     def open_account(
         self,
-        type: typing.Optional[Literal["roth", "brokerage"]],
-        transfer: float = None
+        type: typing.Optional[Literal["roth", "brokerage"]]
     ):
 
         """
+        Opens either a brokerage or roth account. If a roth account is opened, the new account number is stored in
+        self.new_account_number.
+
         Parameters:
-            type: str: The type of account to open.
-            transfer: float: amount of money you want to transfer
+            type (str): The type of account to open.
         """
         # TEST FLAG TO ENSURE NO ACCIDENTAL OPENING
         print("OPENING ACCOUNT, PLEASE CONTINUE")
-    
         self.page.pause()
-        
-        # works now with accoount opening and getting new account number
+
+        # works now with account opening and getting new account number
         if type == "roth":
             # Go to open roth page
             self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation")
@@ -630,31 +630,14 @@ class FidelityAutomation:
 
             # Open an account
             self.page.get_by_role("button", name="Open account").click()
-            self.wait_for_loading_sign()
+            self.wait_for_loading_sign(timeout=60000)
             congrats_message = self.page.get_by_role("heading", name="Congratulations, your account")
             congrats_message.wait_for(state="visible")
 
             # Get the account number among other things
+            # GOT THIS ERROR ONCE ON 10/15/2024 'list' object has no attribute 'replace'
             self.new_account_number = self.page.get_by_role("heading", name="Your account number is").text_content()
-            self.new_account_number = account.replace("Your account number is ", "")
-
-            # Get the account number from the first row of the messages table
-            # if not self.find_new_account_number(type="roth"):
-            #     return (True, None)
-
-            # message_table = self.page.locator(".messages-table")
-            # first_row = message_table.locator("tbody tr").first
-            # account_cell = first_row.locator("td:nth-child(4)")  # 4th column is the Account column
-            # account_text = account_cell.inner_text()
-
-            # # Extract the account number using regex
-            # match = re.search(r'ROTH IRA\s*\((\d+)\)', account_text)
-            # if match:
-            #     self.new_account_number = match.group(1)
-            #     print(f"New Roth IRA account number found: {self.new_account_number}")
-            # else:
-            #     print("Could not find Roth IRA account number in the message table.")
-            #     return (False, None)
+            self.new_account_number = self.new_account_number.replace("Your account number is ", "")
 
         # got brokerage working
         if type == "brokerage":
@@ -675,55 +658,21 @@ class FidelityAutomation:
             self.page.get_by_role("button", name="Open account").click()
             self.wait_for_loading_sign(timeout=60000)   # Can take a while to open sometimes
 
-            # Navigate to the Message center
-            if not self.find_new_account_number(type="brokerage"):
-                return (True, None)
-            # self.page.goto("https://servicemessages.fidelity.com/ftgw/amtd/messageCenter")
-            # self.wait_for_loading_sign()
-
-            # # Get the account number from the first row of the messages table
-            # message_table = self.page.locator(".messages-table")
-            # first_row = message_table.locator("tbody tr").first
-            # account_cell = first_row.locator("td:nth-child(4)")  # 4th column is the Account column
-            # account_text = account_cell.inner_text()
-            
-            # # Extract the account number from the text (it's in parentheses)
-            # match = re.search(r'\((Z\d+)\)', account_text)
-            # if match:
-            #     self.new_account_number = match.group(1)
-            #     print(f"New account created: {self.new_account_number}")
-            # else:
-            #     print("Could not find account number in the message table.")
-            #     return (False, None)
-            
-        if (transfer is not None and
-            self.new_account_number is not None and
-            self.source_account is not None
-        ):
-            
-            # Start funding the account
-            success = self.transfer_acc_to_acc(self.source_account, self.new_account_number, transfer)
-            
-            if success:
-                print(f"Successfully funded your account: {self.new_account_number} ")
-                return (True, self.new_account_number)
-            else:
-                print(f"Failed to transfer your account funds")
-                return (True, None)
-        
-        return (True, self.new_account_number)
+        return True
 
     def find_new_account_number(
         self,
         type: typing.Optional[Literal["roth", "brokerage"]],
     ):
         """
+        DISCLAIMER: THIS DOES NOT WORK
+
         Finds the account number for new accounts created through the Message Center.
         Currently only has functionality for finding Roth and Individual accounts.
         This will print a confirmation message of the results upon completion.
 
         Parameters:
-            type: str: What type of account to find.
+            type (str): What type of account to find.
 
         Post Conditions:
             Assigns self.new_account_number to the account number found.        
@@ -842,52 +791,67 @@ class FidelityAutomation:
         TODO make account parameter into a list so i can just iterate through all available accounts 
         (this might not work because new accounts dont have positions and dont show up in the account info function)
         
+        TODO Problems
+        When the checkbox version comes around, sometimes it takes forever to load.
+        When reloading the page or navigating away, it makes you sign in again
+
+
         """
-        self.page.wait_for_load_state(state="load")
-        self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/features")
-        self.page.get_by_label("Manage Penny Stock Trading").click()
-
-        self.page.wait_for_load_state(state="load", timeout=30000)
-        self.wait_for_loading_sign()
-        if self.page.get_by_role("button", name="Start").is_visible():
-            self.page.get_by_role("button", name="Start").click()
-        self.wait_for_loading_sign()
-
-        # Ensure the page is loaded
-        select_account_title = self.page.get_by_role("heading", name="Select an account")
-        select_account_title.wait_for(timeout=30000, state="visible")
-
-        # There are 2 versions of this. A checkbox and a drop down
-
-        # Checkbox version
-        # This one seems to have trouble with infinite loading sign
-        if self.page.locator("label").filter(has_text=account).is_visible():
-            # This seems to never work for checkbox version so reload and try for dropdown version
-            # return self.enable_pennystock_trading(account=account)
-            self.page.locator("label").filter(has_text=account).click()
-
-        # Dropdown version
-        if self.page.get_by_label("Your eligible accounts").is_visible():
-            self.page.get_by_label("Your eligible accounts").select_option(account)
-        
-        # Continue with enabling
-        self.page.get_by_role("button", name="Continue").click()
         try:
-            self.wait_for_loading_sign(timeout=60000)
-        except PlaywrightTimeoutError:
-            # Reload
-            return self.enable_pennystock_trading(account=account)
+            self.page.wait_for_load_state(state="load")
+            self.page.goto(url="https://digital.fidelity.com/ftgw/digital/portfolio/features")
+            self.page.get_by_label("Manage Penny Stock Trading").click()
 
-        self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/easy/hrt/pst/termsandconditions")
-        self.wait_for_loading_sign()
-        # Accept the risks
-        self.page.query_selector(".pvd-checkbox__label").click()
-        self.page.get_by_role("button", name="Submit").click()
-        self.wait_for_loading_sign()
-        # Verify success
-        success_ribbon = self.page.get_by_role("heading", name="Success!")
-        success_ribbon.wait_for(state="visible", timeout=30000)
-        return True
+            self.page.wait_for_load_state(state="load", timeout=30000)
+            self.wait_for_loading_sign()
+            if self.page.get_by_role("button", name="Start").is_visible():
+                self.page.get_by_role("button", name="Start").click()
+            self.wait_for_loading_sign()
+
+            # Ensure the page is loaded
+            select_account_title = self.page.get_by_role("heading", name="Select an account")
+            select_account_title.wait_for(timeout=30000, state="visible")
+
+            # There are 2 versions of this. A checkbox and a drop down
+
+            # Checkbox version
+            # This one seems to have trouble with infinite loading sign
+            if self.page.locator("label").filter(has_text=account).is_visible():
+                # This seems to never work for checkbox version so reload and try for dropdown version
+                # return self.enable_pennystock_trading(account=account)
+                self.page.locator("label").filter(has_text=account).click()
+
+            # Dropdown version
+            if self.page.get_by_label("Your eligible accounts").is_visible():
+                self.page.get_by_label("Your eligible accounts").select_option(account)
+            
+            # Continue with enabling
+            self.page.get_by_role("button", name="Continue").click()
+            try:
+                self.wait_for_loading_sign(timeout=60000)
+            except PlaywrightTimeoutError:
+                # Reload
+                return self.enable_pennystock_trading(account=account)
+            try:
+                self.page.wait_for_url(url="https://digital.fidelity.com/ftgw/digital/easy/hrt/pst/termsandconditions")
+                # TODO This is the page that it navigates to after the checkbox version
+                # https://digital.fidelity.com/ftgw/digital/brokerage-host/psta/TermsAndCondtions
+            except PlaywrightTimeoutError as e:
+                if not "termsandconditions" in self.page.url.lower():
+                    raise Exception(e)
+            self.wait_for_loading_sign()
+            # Accept the risks
+            self.page.query_selector(".pvd-checkbox__label").click()
+            self.page.get_by_role("button", name="Submit").click()
+            self.wait_for_loading_sign()
+            # Verify success
+            success_ribbon = self.page.get_by_role("heading", name="Success!")
+            success_ribbon.wait_for(state="visible", timeout=30000)
+            return True
+
+        except Exception as e:
+            print(f"Error: {e}")
+            return False
     
     def download_prev_statement(self, date: str):
         """
@@ -973,7 +937,7 @@ if __name__ == "__main__":
                 save_device=False,
             )
             if step_1 and step_2:
-                print("Logged in")
+                print(f"Logged into user: {account[0][:3]}")
 
             # User loop
             while(True):
