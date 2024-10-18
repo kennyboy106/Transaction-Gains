@@ -606,59 +606,60 @@ class FidelityAutomation:
         except Exception as e:
             return (False, e)
 
-    def open_account(
-        self,
-        type: typing.Optional[Literal["roth", "brokerage"]]
-    ):
-
+    def open_account(self, type: typing.Optional[Literal["roth", "brokerage"]]) -> bool:
         """
         Opens either a brokerage or roth account. If a roth account is opened, the new account number is stored in
         self.new_account_number.
 
         Parameters:
             type (str): The type of account to open.
+
+        Returns:
+            success (bool): If the account was successfully opened
         """
         # TEST FLAG TO ENSURE NO ACCIDENTAL OPENING
         print("OPENING ACCOUNT, PLEASE CONTINUE")
         self.page.pause()
-
-        # works now with account opening and getting new account number
-        if type == "roth":
-            # Go to open roth page
-            self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation")
-            self.wait_for_loading_sign()
-
-            # Open an account
-            self.page.get_by_role("button", name="Open account").click()
-            self.wait_for_loading_sign(timeout=60000)
-            congrats_message = self.page.get_by_role("heading", name="Congratulations, your account")
-            congrats_message.wait_for(state="visible")
-
-            # Get the account number among other things
-            # GOT THIS ERROR ONCE ON 10/15/2024 'list' object has no attribute 'replace'
-            self.new_account_number = self.page.get_by_role("heading", name="Your account number is").text_content()
-            self.new_account_number = self.new_account_number.replace("Your account number is ", "")
-
-        # got brokerage working
-        if type == "brokerage":
-            # # Go to individual brokerage page
-            self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/JointSelectionPage")
-            self.wait_for_loading_sign()
-
-            # First section (This won't be present if an application was already started)
-            if self.page.get_by_role("heading", name="Account ownership").is_visible():
-                self.page.get_by_role("button", name="Next").click()
+        try:
+            if type == "roth":
+                # Go to open roth page
+                self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/RothIRAccountOpening/PersonalInformation")
                 self.wait_for_loading_sign()
 
-            # If application is already started, then there will only be 1 "Next" button
-            self.page.get_by_role("button", name="Next").click()
-            self.wait_for_loading_sign()
-            
-            # Open account
-            self.page.get_by_role("button", name="Open account").click()
-            self.wait_for_loading_sign(timeout=60000)   # Can take a while to open sometimes
+                # Open an account
+                self.page.get_by_role("button", name="Open account").click()
+                self.wait_for_loading_sign(timeout=60000)
+                congrats_message = self.page.get_by_role("heading", name="Congratulations, your account")
+                congrats_message.wait_for(state="visible")
 
-        return True
+                # Get the account number
+                self.new_account_number = self.page.get_by_role("heading", name="Your account number is").text_content()
+                self.new_account_number = self.new_account_number.replace("Your account number is ", "")
+
+            if type == "brokerage":
+                # # Go to individual brokerage page
+                self.page.goto(url="https://digital.fidelity.com/ftgw/digital/aox/BrokerageAccountOpening/JointSelectionPage")
+                self.wait_for_loading_sign()
+
+                # First section (This won't be present if an application was already started)
+                if self.page.get_by_role("heading", name="Account ownership").is_visible():
+                    self.page.get_by_role("button", name="Next").click()
+                    self.wait_for_loading_sign()
+
+                # If application is already started, then there will only be 1 "Next" button
+                self.page.get_by_role("button", name="Next").click()
+                self.wait_for_loading_sign()
+                
+                # Open account
+                self.page.get_by_role("button", name="Open account").click()
+                self.wait_for_loading_sign(timeout=60000)   # Can take a while to open sometimes
+
+                # TODO Add in some way to confirm this
+
+            return True
+        except Exception as e:
+            print(e)
+            return False
 
     def find_new_account_number(
         self,
@@ -947,7 +948,7 @@ if __name__ == "__main__":
                     account_type = input("Enter account type to open (roth/brokerage): ").lower()
                     while account_type not in ["roth", "brokerage"]:
                         account_type = input("Invalid input. Please enter 'roth' or 'brokerage': ").lower()
-                    success, _ = browser.open_account(type=account_type)
+                    success = browser.open_account(type=account_type)
                     if success:
                         print("Account opened")
 
@@ -975,41 +976,3 @@ if __name__ == "__main__":
 
     except Exception as e:
         print(e)
-
-    # exit_con = 1
-    # while exit_con:
-
-        # browser.page.pause()
-        # choice = input("""
-        #             0: Quit\n
-        #             1: locator string\n
-        #             2: CSS selector string\n
-        #             3: Get by text\n
-        #             4: Get by role\n
-        #             5: Get by label\n
-        #             6: Goto url\n
-        #             7: Get text of CSS selector\n
-        #             """)
-        # choice = int(choice)
-        # try:
-        #     if choice > 0:
-        #         str_in = input("Enter the str to click")
-        #         if choice == 1:
-        #             browser.page.locator(str_in).click()
-        #         if choice == 2:
-        #             browser.page.query_selector(str_in).click()
-        #         if choice == 3:
-        #             browser.page.get_by_text(str_in).click()
-        #         if choice == 4:
-        #             browser.page.get_by_role(str_in).click()
-        #         if choice == 5:
-        #             browser.page.get_by_label(str_in).click()
-        #         if choice == 6:
-        #             browser.page.goto(str_in)
-        #         if choice == 7:
-        #             print(browser.page.query_selector(str_in).text_content())
-        #     else:
-        #         exit_con = 0
-        # except:
-        #     pass
-        
